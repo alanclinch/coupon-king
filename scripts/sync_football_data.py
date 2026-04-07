@@ -1,0 +1,154 @@
+import os
+import requests
+import psycopg2
+
+DB = os.environ["DB_CONNECTION_STRING"]
+API_KEY = os.environ["FOOTBALL_DATA_API_KEY"]
+BASE_URL = "https://api.football-data.org/v4"
+HEADERS = {"X-Auth-Token": API_KEY}
+
+# football-data.org competition codes mapped to our league names
+COMPETITIONS = {
+    "PL":  "Premier League",
+    "ELC": "Championship",
+    "CL":  "Champions League",
+}
+
+def get_conn():
+    return psycopg2.connect(DB)
+
+def get_local_league_id(conn, name):
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM leagues WHERE name = %s", (name,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+def upsert_team(conn, api_team_id, name, local_league_id):
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT local_id FROM api_id_map
+            WHERE table_name = 'teams' AND api_source = 'football-data' AND api_id = %s
+        """, (str(api_team_id),))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+        cur.execute("""
+            INSERT INTO teams (name, league_id, active)
+            VALUES (%s, %s, TRUE)
+            RETURNING id
+        """, (name, local_league_id))
+        local_id = cur.fetchone()[0]
+
+        cur.execute("""
+            INSERT INTO api_id_map (table_name, local_id, api_source, api_id)
+            VALUES ('teams', %s, 'football-data', %s)
+            ON CONFLICT DO NOTHING
+        """, (local_id, str(api_team_id)))
+
+        conn.commit()
+        return local_id
+
+def upsert_fixture(conn, api_fixture_id, home_id, away_id, league_id, kickoff, season, matchday):
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT local_id FROM api_id_map
+            WHERE table_name = 'fixtures' AND api_source = 'football-data' AND api_id = %s
+        """, (str(api_fixture_id),))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+        cur.execute("""
+            INSERT INTO fixtures (home_team_id, away_team_id, league_id, season, kickoff_time, status, matchday)
+            VALUES (%s, %s, %s, %s, %s, 'scheduled', %s)
+            RETURNING id
+        """, (home_id, away_id, league_id, kickoff, season, matchday))
+        local_id = cur.fetchone()[0]
+
+        cur.execute("""
+            INSERT INTO api_id_map (table_name, local_id, api_source, api_id)
+            VALUES ('fixtures', %s, 'football-data', %s)
+            ON CONFLICT DO NOTHING
+        """, (local_id, str(api_fixture_id)))
+
+        conn.commit()
+        return local_id
+
+def upsert_result(conn, fixture_local_id, home_goals, away_goals, home_ht, away_ht):
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO results (fixture_id, home_goals, away_goals, home_goals_ht, away_goals_ht)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (fixture_id) DO UPDATE
+            SET home_goals = EXCLUDED.home_goals,
+                away_goals = EXCLUDED.away_goals,
+                home_goals_ht = EXCLUDED.home_goals_ht,
+                away_goals_ht = EXCLUDED.away_goals_ht
+        """, (fixture_local_id, home_goals, away_goals, home_ht, away_ht))
+        conn.commit()
+
+def fetch_matches(competition_code, season):
+    url = f"{BASE_URL}/competitions/{competition_code}/matches?season={season}"
+    r = requests.get(url, headers=HEADERS)
+    r.raise_for_status()
+    return r.json().get("matches", [])
+
+def main():
+    conn = get_conn()
+
+    # Sync current season and last 3 seasons for historical data
+    current_year = 2024
+    seasons = [current_year - i for i in range(3)]
+
+    for code, league_name in COMPETITIONS.items():
+        local_league_id = get_local_league_id(conn, league_name)
+        if not local_league_id:
+            print(f"League not found: {league_name}")
+            continue
+
+        for season in seasons:
+            print(f"Syncing {league_name} season {season}...")
+            try:
+                matches = fetch_matches(code, season)
+            except Exception as e:
+                print(f"  Error fetching {league_name} {season}: {e}")
+                continue
+
+            print(f"  Found {len(matches)} matches")
+
+            for m in matches:
+                home = m.get("homeTeam", {})
+                away = m.get("awayTeam", {})
+                if not home.get("id") or not away.get("id"):
+                    continue
+
+                home_local = upsert_team(conn, home["id"], home["name"], local_league_id)
+                away_local = upsert_team(conn, away["id"], away["name"], local_league_id)
+
+                kickoff = m.get("utcDate")
+                matchday = m.get("matchday")
+                season_label = str(season)
+
+                fixture_local = upsert_fixture(
+                    conn, m["id"], home_local, away_local,
+                    local_league_id, kickoff, season_label, matchday
+                )
+
+                # Save result if finished
+                if m.get("status") == "FINISHED":
+                    score = m.get("score", {})
+                    ft = score.get("fullTime", {})
+                    ht = score.get("halfTime", {})
+                    if ft.get("home") is not None and ft.get("away") is not None:
+                        upsert_result(
+                            conn, fixture_local,
+                            ft["home"], ft["away"],
+                            ht.get("home"), ht.get("away")
+                        )
+
+    conn.close()
+    print("football-data sync complete")
+
+if __name__ == "__main__":
+    main()
