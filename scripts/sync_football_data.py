@@ -63,7 +63,7 @@ def upsert_fixture(conn, api_fixture_id, home_id, away_id, league_id, kickoff, s
             INSERT INTO fixtures (home_team_id, away_team_id, league_id, season, kickoff_time, status, matchday)
             VALUES (%s, %s, %s, %s, %s, 'scheduled', %s)
             RETURNING id
-        """, (home_id, away_id, league_id, kickoff, season, matchday))
+        """, (home_id, away_id, league_id, season, kickoff, matchday))
         local_id = cur.fetchone()[0]
 
         cur.execute("""
@@ -97,7 +97,6 @@ def fetch_matches(competition_code, season):
 def main():
     conn = get_conn()
 
-    # Sync current season and last 3 seasons for historical data
     current_year = 2024
     seasons = [current_year - i for i in range(3)]
 
@@ -123,10 +122,13 @@ def main():
                 if not home.get("id") or not away.get("id"):
                     continue
 
+                kickoff = m.get("utcDate")
+                if not kickoff or len(kickoff) < 10:
+                    continue
+
                 home_local = upsert_team(conn, home["id"], home["name"], local_league_id)
                 away_local = upsert_team(conn, away["id"], away["name"], local_league_id)
 
-                kickoff = m.get("utcDate")
                 matchday = m.get("matchday")
                 season_label = str(season)
 
