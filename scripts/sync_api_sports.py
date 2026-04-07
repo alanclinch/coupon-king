@@ -73,7 +73,7 @@ def upsert_fixture(conn, api_fixture_id, home_id, away_id, league_id, kickoff, s
             INSERT INTO fixtures (home_team_id, away_team_id, league_id, season, kickoff_time, status, matchday)
             VALUES (%s, %s, %s, %s, %s, 'scheduled', %s)
             RETURNING id
-        """, (home_id, away_id, league_id, kickoff, season, matchday))
+        """, (home_id, away_id, league_id, season, kickoff, matchday))
         local_id = cur.fetchone()[0]
 
         cur.execute("""
@@ -137,10 +137,13 @@ def main():
                 if not home.get("id") or not away.get("id"):
                     continue
 
+                kickoff = fixture.get("date")
+                if not kickoff or len(kickoff) < 10:
+                    continue
+
                 home_local = upsert_team(conn, home["id"], home["name"], local_league_id)
                 away_local = upsert_team(conn, away["id"], away["name"], local_league_id)
 
-                kickoff = fixture.get("date")
                 matchday = f.get("league", {}).get("round")
                 season_label = str(season)
 
