@@ -1,7 +1,7 @@
 'use strict';
 
 // ── Config ────────────────────────────────────────────────────────────────────
-let API_BASE = localStorage.getItem('api_base') || 'http://localhost:8000';
+let API_BASE = localStorage.getItem('api_base') || 'https://coupon-king-api.onrender.com';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const state = {
