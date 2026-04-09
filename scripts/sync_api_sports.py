@@ -2,6 +2,7 @@ import os
 import requests
 import psycopg2
 import time
+from datetime import datetime
 
 DB = os.environ["DB_CONNECTION_STRING"]
 API_KEY = os.environ["API_SPORTS_KEY"]
@@ -107,8 +108,15 @@ def fetch_fixtures(league_id, season):
 def main():
     conn = get_conn()
 
-    current_year = 2024
-    seasons = [current_year - i for i in range(3)]
+    now = datetime.now()
+    # Football seasons start in July/August, so April 2026 = season 2025
+    current_season = now.year if now.month >= 7 else now.year - 1
+    if os.environ.get('FULL_SYNC') == '1':
+        seasons = [current_season - i for i in range(3)]
+        print("Full sync mode: syncing 3 seasons")
+    else:
+        seasons = [current_season]
+        print(f"Nightly sync mode: syncing current season {current_season} only")
 
     for api_league_id, league_name in LEAGUES.items():
         local_league_id = get_local_league_id(conn, league_name)

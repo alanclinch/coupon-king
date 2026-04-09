@@ -3,7 +3,13 @@ name: Nightly Data Sync
 on:
   schedule:
     - cron: '0 1 * * *'  # Runs every night at 1am UTC
-  workflow_dispatch:       # Allows manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      full_sync:
+        description: 'Sync all 3 seasons (slow, for backfill)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   sync:
@@ -25,16 +31,24 @@ jobs:
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
           SPORTMONKS_API_KEY: ${{ secrets.SPORTMONKS_API_KEY }}
+          FULL_SYNC: ${{ inputs.full_sync == true && '1' || '0' }}
         run: python scripts/sync_sportmonks.py
 
       - name: Run football-data sync
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
           FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+          FULL_SYNC: ${{ inputs.full_sync == true && '1' || '0' }}
         run: python scripts/sync_football_data.py
 
       - name: Run API-Sports sync
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
           API_SPORTS_KEY: ${{ secrets.API_SPORTS_KEY }}
+          FULL_SYNC: ${{ inputs.full_sync == true && '1' || '0' }}
         run: python scripts/sync_api_sports.py
+
+      - name: Build form and H2H cache
+        env:
+          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+        run: python scripts/build_form_cache.py
