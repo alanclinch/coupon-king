@@ -240,23 +240,33 @@ function renderFixturesView() {
   if (state.error)   return `<div class="error-msg">${esc(state.error)}</div>`;
   if (!state.fixtures.length) return '<div class="empty-state">No fixtures found for this filter.</div>';
 
-  // Group by league
-  const groups = {};
+  // Group by day, then league within each day
+  const days = {};
   for (const f of state.fixtures) {
-    if (!groups[f.league_name]) groups[f.league_name] = [];
-    groups[f.league_name].push(f);
+    const day = f.kickoff_time.split('T')[0];
+    if (!days[day]) days[day] = {};
+    if (!days[day][f.league_name]) days[day][f.league_name] = [];
+    days[day][f.league_name].push(f);
   }
 
-  // Sort leagues in correct order
-  const sortedLeagues = Object.keys(groups).sort(
-    (a, b) => leagueSortIndex(a) - leagueSortIndex(b)
-  );
+  const sortedDays = Object.keys(days).sort();
 
   let html = '<div class="fixtures-list">';
-  for (const league of sortedLeagues) {
-    const fixtures = groups[league];
-    html += `<div class="league-header">${esc(league)}</div>`;
-    for (const f of fixtures) {
+  for (const day of sortedDays) {
+    const dayDate = new Date(day + 'T12:00:00Z');
+    const dayLabel = dayDate.toLocaleDateString('en-GB', {
+      weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/London',
+    });
+    html += `<div class="day-header">${esc(dayLabel)}</div>`;
+
+    const leagues = Object.keys(days[day]).sort(
+      (a, b) => leagueSortIndex(a) - leagueSortIndex(b)
+    );
+
+    for (const league of leagues) {
+      const fixtures = days[day][league];
+      html += `<div class="league-header">${esc(league)}</div>`;
+      for (const f of fixtures) {
       const sel       = inCoupon(f.id);
       const completed = f.home_goals !== null && f.home_goals !== undefined;
       const middle    = completed
@@ -276,6 +286,7 @@ function renderFixturesView() {
             <span class="team-name away">${esc(f.away_team)}</span>
           </div>
         </div>`;
+      }
     }
   }
   html += '</div>';

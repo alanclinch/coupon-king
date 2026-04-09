@@ -135,13 +135,22 @@ main {
   gap: 4px;
 }
 
+.day-header {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--brand);
+  padding: 16px 4px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
 .league-header {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-muted);
-  padding: 12px 4px 4px;
+  padding: 10px 4px 4px;
 }
 
 .fixture-card {
