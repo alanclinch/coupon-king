@@ -186,22 +186,22 @@ function updateApiBase(url) {
 
 // ── League display order ──────────────────────────────────────────────────────
 const LEAGUE_ORDER = [
+  'Champions League',
+  'Europa League',
+  'Conference League',
+  'FA Cup',
+  'EFL Cup',
   'Premier League',
   'Championship',
   'League One',
   'League Two',
   'National League',
-  'FA Cup',
-  'EFL Cup',
+  'Scottish Cup',
+  'Scottish League Cup',
   'Scottish Premiership',
   'Scottish Championship',
   'Scottish League One',
   'Scottish League Two',
-  'Scottish Cup',
-  'Scottish League Cup',
-  'Champions League',
-  'Europa League',
-  'Conference League',
 ];
 
 function leagueSortIndex(name) {
