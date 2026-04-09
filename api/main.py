@@ -80,7 +80,7 @@ def get_saturday_3pm(conn=Depends(get_db)):
             WHERE f.kickoff_time::date = %s
               AND EXTRACT(hour FROM f.kickoff_time AT TIME ZONE 'UTC') IN (13, 14, 15)
               AND r.fixture_id IS NULL
-            ORDER BY l.name, ht.name
+            ORDER BY f.kickoff_time, ht.name
             """,
             (saturday,),
         )
@@ -107,7 +107,7 @@ def get_fixtures(
 
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_FIXTURE_COLS} {_FIXTURE_JOINS} {where} ORDER BY f.kickoff_time, l.name",
+            f"SELECT {_FIXTURE_COLS} {_FIXTURE_JOINS} {where} ORDER BY f.kickoff_time, ht.name",
             params,
         )
         return cur.fetchall()

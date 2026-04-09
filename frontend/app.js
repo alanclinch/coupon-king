@@ -184,6 +184,31 @@ function updateApiBase(url) {
   localStorage.setItem('api_base', API_BASE);
 }
 
+// ── League display order ──────────────────────────────────────────────────────
+const LEAGUE_ORDER = [
+  'Premier League',
+  'Championship',
+  'League One',
+  'League Two',
+  'National League',
+  'FA Cup',
+  'EFL Cup',
+  'Scottish Premiership',
+  'Scottish Championship',
+  'Scottish League One',
+  'Scottish League Two',
+  'Scottish Cup',
+  'Scottish League Cup',
+  'Champions League',
+  'Europa League',
+  'Conference League',
+];
+
+function leagueSortIndex(name) {
+  const i = LEAGUE_ORDER.indexOf(name);
+  return i === -1 ? 999 : i;
+}
+
 // ── Market labels ─────────────────────────────────────────────────────────────
 const MARKETS = {
   '1':        'Home Win',
@@ -222,8 +247,14 @@ function renderFixturesView() {
     groups[f.league_name].push(f);
   }
 
+  // Sort leagues in correct order
+  const sortedLeagues = Object.keys(groups).sort(
+    (a, b) => leagueSortIndex(a) - leagueSortIndex(b)
+  );
+
   let html = '<div class="fixtures-list">';
-  for (const [league, fixtures] of Object.entries(groups)) {
+  for (const league of sortedLeagues) {
+    const fixtures = groups[league];
     html += `<div class="league-header">${esc(league)}</div>`;
     for (const f of fixtures) {
       const sel       = inCoupon(f.id);
