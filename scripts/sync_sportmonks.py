@@ -97,13 +97,25 @@ def fetch_fixtures(season_id):
         url = data.get("pagination", {}).get("next_page")
     return fixtures
 
-def get_current_seasons():
-    url = f"{BASE_URL}/leagues/{SCOTTISH_PREM_ID}?include=currentSeason"
+def get_seasons():
+    url = f"{BASE_URL}/seasons?filters=seasonLeagues:{SCOTTISH_PREM_ID}"
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     data = r.json()
-    season = data["data"].get("currentSeason")
-    return [season] if season else []
+    all_seasons = data.get("data", [])
+    print(f"  Found {len(all_seasons)} seasons for Scottish Premiership")
+    for s in all_seasons:
+        print(f"    Season: {s.get('name')} id={s.get('id')}")
+
+    now = datetime.now()
+    current_year = now.year if now.month >= 7 else now.year - 1
+
+    if os.environ.get('FULL_SYNC') == '1':
+        cutoff = current_year - 2
+        return [s for s in all_seasons if s.get('name', '').startswith(str(cutoff)) or
+                any(str(y) in s.get('name', '') for y in range(cutoff, current_year + 1))]
+    else:
+        return [s for s in all_seasons if str(current_year) in s.get('name', '')]
 
 def main():
     conn = get_conn()
@@ -112,7 +124,7 @@ def main():
         print("Scottish Premiership not found in leagues table")
         return
 
-    seasons = get_current_seasons()
+    seasons = get_seasons()
     for season in seasons:
         season_id = season["id"]
         season_label = season.get("name", str(season_id))
