@@ -286,41 +286,41 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
         flags = []
 
         if market == "1":
-            if hf and hf["wins"] == 0:
-                flags.append(f"{fixture['home_team']} have not won in their last {hf['played']} matches (form: {hf['form_string']})")
-            if hf and hf["losses"] >= 4:
+            if hf and hf["wins"] <= 1:
+                flags.append(f"{fixture['home_team']} have only {hf['wins']} win(s) in their last {hf['played']} matches (form: {hf['form_string']})")
+            if hf and hf["losses"] >= 3:
                 flags.append(f"{fixture['home_team']} have lost {hf['losses']} of their last {hf['played']} matches")
-            if af and af["wins"] >= 4:
-                flags.append(f"{fixture['away_team']} are in excellent form — {af['wins']}W in last {af['played']}")
+            if af and af["wins"] >= 3:
+                flags.append(f"{fixture['away_team']} are in good form — {af['wins']}W in last {af['played']}")
 
         elif market == "2":
-            if af and af["wins"] == 0:
-                flags.append(f"{fixture['away_team']} have not won in their last {af['played']} matches (form: {af['form_string']})")
-            if af and af["losses"] >= 4:
+            if af and af["wins"] <= 1:
+                flags.append(f"{fixture['away_team']} have only {af['wins']} win(s) in their last {af['played']} matches (form: {af['form_string']})")
+            if af and af["losses"] >= 3:
                 flags.append(f"{fixture['away_team']} have lost {af['losses']} of their last {af['played']} matches")
-            if hf and hf["wins"] >= 4:
-                flags.append(f"{fixture['home_team']} are in excellent form — {hf['wins']}W in last {hf['played']}")
+            if hf and hf["wins"] >= 3:
+                flags.append(f"{fixture['home_team']} are in good form — {hf['wins']}W in last {hf['played']}")
 
         elif market == "X":
-            if hf and hf["draws"] == 0:
-                flags.append(f"{fixture['home_team']} have not drawn in their last {hf['played']} matches")
-            if af and af["draws"] == 0:
-                flags.append(f"{fixture['away_team']} have not drawn in their last {af['played']} matches")
+            if hf and hf["draws"] <= 1:
+                flags.append(f"{fixture['home_team']} have only {hf['draws']} draw(s) in their last {hf['played']} matches")
+            if af and af["draws"] <= 1:
+                flags.append(f"{fixture['away_team']} have only {af['draws']} draw(s) in their last {af['played']} matches")
 
         elif market == "BTTS_YES":
-            if hf and hf["goals_scored"] == 0:
-                flags.append(f"{fixture['home_team']} have not scored in their last {hf['played']} matches")
-            if af and af["goals_scored"] == 0:
-                flags.append(f"{fixture['away_team']} have not scored in their last {af['played']} matches")
-            if hf and hf["clean_sheets"] >= 4:
+            if hf and hf["goals_scored"] <= 2:
+                flags.append(f"{fixture['home_team']} have scored only {hf['goals_scored']} goal(s) in their last {hf['played']} matches")
+            if af and af["goals_scored"] <= 2:
+                flags.append(f"{fixture['away_team']} have scored only {af['goals_scored']} goal(s) in their last {af['played']} matches")
+            if hf and hf["clean_sheets"] >= 3:
                 flags.append(f"{fixture['home_team']} have kept {hf['clean_sheets']} clean sheets in last {hf['played']}")
-            if af and af["clean_sheets"] >= 4:
+            if af and af["clean_sheets"] >= 3:
                 flags.append(f"{fixture['away_team']} have kept {af['clean_sheets']} clean sheets in last {af['played']}")
 
         elif market == "BTTS_NO":
-            if hf and hf["goals_scored"] >= 8:
+            if hf and hf["goals_scored"] >= 6:
                 flags.append(f"{fixture['home_team']} are high scorers — {hf['goals_scored']} goals in last {hf['played']}")
-            if af and af["goals_scored"] >= 8:
+            if af and af["goals_scored"] >= 6:
                 flags.append(f"{fixture['away_team']} are high scorers — {af['goals_scored']} goals in last {af['played']}")
 
         elif market in ("OVER25", "UNDER25"):
@@ -332,7 +332,7 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
                     avg = total / played
                     if market == "OVER25" and avg < 2.0:
                         flags.append(f"Combined average of {avg:.1f} goals/match — low-scoring sides")
-                    elif market == "UNDER25" and avg > 3.5:
+                    elif market == "UNDER25" and avg > 3.0:
                         flags.append(f"Combined average of {avg:.1f} goals/match — high-scoring sides")
 
         risk = "high" if len(flags) >= 2 else "medium" if len(flags) == 1 else "low"
