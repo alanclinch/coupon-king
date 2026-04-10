@@ -480,10 +480,10 @@ function renderFixturesView() {
           : '';
 
         html += `
-          <div class="${classes}"${!completed ? ` onclick="handleCardTap(${f.id})"` : ''} style="${!completed ? 'cursor:pointer' : ''}">
+          <div class="${classes}">
             ${scoreInfo ? `<div class="fixture-score-bar" style="background:${scoreColor};width:${scoreInfo.score}%"></div>` : ''}
             <div class="fixture-row">
-              <div class="fixture-main">
+              <div class="fixture-main"${!completed ? ` onclick="handleCardTap(${f.id})"` : ''} style="${!completed ? 'cursor:pointer' : ''}">
                 <div class="fixture-meta">
                   <span class="fixture-time">${esc(fmtDate(f.kickoff_time))} &middot; ${esc(fmtTime(f.kickoff_time))}</span>
                   <div style="display:flex;align-items:center;gap:6px">
@@ -497,7 +497,7 @@ function renderFixturesView() {
                   <span class="team-name away">${esc(f.away_team)}</span>
                 </div>
               </div>
-              ${!completed ? `<button class="add-btn${sel ? ' added' : ''}" onclick="handleAddBtn(event,${f.id})" aria-label="${sel ? 'Remove from coupon' : 'Add to coupon'}">${sel ? '&#10003;' : '+'}</button>` : ''}
+              ${!completed ? `<button class="add-btn${sel ? ' added' : ''}" onclick="handleAddBtn(${f.id})" aria-label="${sel ? 'Remove from coupon' : 'Add to coupon'}">${sel ? '&#10003;' : '+'}</button>` : ''}
             </div>
           </div>`;
       }
@@ -921,8 +921,7 @@ function handleCardTap(id) {
   if (fixture) openDetail(fixture);
 }
 
-function handleAddBtn(event, id) {
-  event.stopPropagation();
+function handleAddBtn(id) {
   const fixture = state.fixtures.find(f => f.id === id);
   if (fixture) addToCoupon(fixture);
 }
