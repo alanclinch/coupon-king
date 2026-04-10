@@ -371,7 +371,7 @@ function renderFixturesView() {
         const classes   = ['fixture-card', sel ? 'selected' : '', completed ? 'completed' : ''].filter(Boolean).join(' ');
 
         html += `
-          <div class="${classes}">
+          <div class="${classes}"${!completed ? ` onclick="handleCardTap(${f.id})"` : ''} style="${!completed ? 'cursor:pointer' : ''}">
             <div class="fixture-main">
               <div class="fixture-meta">
                 <span class="fixture-time">${esc(fmtDate(f.kickoff_time))} &middot; ${esc(fmtTime(f.kickoff_time))}</span>
@@ -645,6 +645,11 @@ function render() {
 }
 
 // ── Global handlers (called from inline onclick) ───────────────────────────────
+function handleCardTap(id) {
+  const fixture = state.fixtures.find(f => f.id === id);
+  if (fixture) addToCoupon(fixture);
+}
+
 function handleAddBtn(event, id) {
   event.stopPropagation();
   const fixture = state.fixtures.find(f => f.id === id);
