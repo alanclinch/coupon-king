@@ -71,6 +71,11 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
+// Wake up Render on load (free tier spins down after inactivity)
+async function wakeApi() {
+  try { await fetch(API_BASE + '/'); } catch (_) {}
+}
+
 async function loadLeagues() {
   if (state.leagues.length) return;
   state.leagues = await apiFetch('/leagues');
@@ -163,7 +168,7 @@ async function loadPicks() {
     }
     state.picks = await apiFetch(`/picks?${p}`);
   } catch (e) {
-    state.error = 'Could not load picks — check your API connection in Settings.';
+    state.error = 'Could not load picks. The API may be waking up — try again in 30 seconds.';
     state.picks = [];
   }
 
@@ -276,7 +281,7 @@ async function analyseCoupon() {
       body: JSON.stringify(body),
     });
   } catch (e) {
-    state.error = 'Could not analyse coupon — check your API connection in Settings.';
+    state.error = 'Could not analyse — the API may be waking up. Try again in 30 seconds.';
   }
 
   state.analysisLoading = false;
@@ -536,7 +541,7 @@ function renderPicksView() {
     return html + `<div class="error-msg">${esc(state.error)}</div>`;
   }
   if (!state.picks.length) {
-    return html + '<div class="empty-state">No picks available for this filter. Form data may still be loading.</div>';
+    return html + '<div class="empty-state">No picks yet — form data is built overnight. Check back tomorrow morning.</div>';
   }
 
   html += '<div class="picks-list">';
@@ -956,6 +961,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => setView(btn.dataset.view));
   });
+
+  // Wake Render free tier before making real requests
+  await wakeApi();
 
   // Load league list for filter pills (non-fatal if API is offline)
   try { await loadLeagues(); } catch (_) {}
