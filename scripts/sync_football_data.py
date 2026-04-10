@@ -24,70 +24,64 @@ def get_local_league_id(conn, name):
         row = cur.fetchone()
         return row[0] if row else None
 
-def upsert_team(conn, api_team_id, name, local_league_id):
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT local_id FROM api_id_map
-            WHERE table_name = 'teams' AND api_source = 'football-data' AND api_id = %s
-        """, (str(api_team_id),))
-        row = cur.fetchone()
-        if row:
-            return row[0]
+def upsert_team(conn, cur, api_team_id, name, local_league_id):
+    cur.execute("""
+        SELECT local_id FROM api_id_map
+        WHERE table_name = 'teams' AND api_source = 'football-data' AND api_id = %s
+    """, (str(api_team_id),))
+    row = cur.fetchone()
+    if row:
+        return row[0]
 
-        cur.execute("""
-            INSERT INTO teams (name, league_id, active)
-            VALUES (%s, %s, TRUE)
-            RETURNING id
-        """, (name, local_league_id))
-        local_id = cur.fetchone()[0]
+    cur.execute("""
+        INSERT INTO teams (name, league_id, active)
+        VALUES (%s, %s, TRUE)
+        RETURNING id
+    """, (name, local_league_id))
+    local_id = cur.fetchone()[0]
 
-        cur.execute("""
-            INSERT INTO api_id_map (table_name, local_id, api_source, api_id)
-            VALUES ('teams', %s, 'football-data', %s)
-            ON CONFLICT DO NOTHING
-        """, (local_id, str(api_team_id)))
+    cur.execute("""
+        INSERT INTO api_id_map (table_name, local_id, api_source, api_id)
+        VALUES ('teams', %s, 'football-data', %s)
+        ON CONFLICT DO NOTHING
+    """, (local_id, str(api_team_id)))
 
-        conn.commit()
-        return local_id
+    return local_id
 
-def upsert_fixture(conn, api_fixture_id, home_id, away_id, league_id, kickoff, season, matchday):
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT local_id FROM api_id_map
-            WHERE table_name = 'fixtures' AND api_source = 'football-data' AND api_id = %s
-        """, (str(api_fixture_id),))
-        row = cur.fetchone()
-        if row:
-            return row[0]
+def upsert_fixture(conn, cur, api_fixture_id, home_id, away_id, league_id, kickoff, season, matchday):
+    cur.execute("""
+        SELECT local_id FROM api_id_map
+        WHERE table_name = 'fixtures' AND api_source = 'football-data' AND api_id = %s
+    """, (str(api_fixture_id),))
+    row = cur.fetchone()
+    if row:
+        return row[0]
 
-        cur.execute("""
-            INSERT INTO fixtures (home_team_id, away_team_id, league_id, season, kickoff_time, status, matchday)
-            VALUES (%s, %s, %s, %s, %s, 'scheduled', %s)
-            RETURNING id
-        """, (home_id, away_id, league_id, season, kickoff, matchday))
-        local_id = cur.fetchone()[0]
+    cur.execute("""
+        INSERT INTO fixtures (home_team_id, away_team_id, league_id, season, kickoff_time, status, matchday)
+        VALUES (%s, %s, %s, %s, %s, 'scheduled', %s)
+        RETURNING id
+    """, (home_id, away_id, league_id, season, kickoff, matchday))
+    local_id = cur.fetchone()[0]
 
-        cur.execute("""
-            INSERT INTO api_id_map (table_name, local_id, api_source, api_id)
-            VALUES ('fixtures', %s, 'football-data', %s)
-            ON CONFLICT DO NOTHING
-        """, (local_id, str(api_fixture_id)))
+    cur.execute("""
+        INSERT INTO api_id_map (table_name, local_id, api_source, api_id)
+        VALUES ('fixtures', %s, 'football-data', %s)
+        ON CONFLICT DO NOTHING
+    """, (local_id, str(api_fixture_id)))
 
-        conn.commit()
-        return local_id
+    return local_id
 
-def upsert_result(conn, fixture_local_id, home_goals, away_goals, home_ht, away_ht):
-    with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO results (fixture_id, home_goals, away_goals, home_goals_ht, away_goals_ht)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (fixture_id) DO UPDATE
-            SET home_goals = EXCLUDED.home_goals,
-                away_goals = EXCLUDED.away_goals,
-                home_goals_ht = EXCLUDED.home_goals_ht,
-                away_goals_ht = EXCLUDED.away_goals_ht
-        """, (fixture_local_id, home_goals, away_goals, home_ht, away_ht))
-        conn.commit()
+def upsert_result(cur, fixture_local_id, home_goals, away_goals, home_ht, away_ht):
+    cur.execute("""
+        INSERT INTO results (fixture_id, home_goals, away_goals, home_goals_ht, away_goals_ht)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (fixture_id) DO UPDATE
+        SET home_goals = EXCLUDED.home_goals,
+            away_goals = EXCLUDED.away_goals,
+            home_goals_ht = EXCLUDED.home_goals_ht,
+            away_goals_ht = EXCLUDED.away_goals_ht
+    """, (fixture_local_id, home_goals, away_goals, home_ht, away_ht))
 
 def fetch_matches(competition_code, season):
     url = f"{BASE_URL}/competitions/{competition_code}/matches?season={season}"
@@ -124,38 +118,42 @@ def main():
 
             print(f"  Found {len(matches)} matches")
 
-            for m in matches:
-                home = m.get("homeTeam", {})
-                away = m.get("awayTeam", {})
-                if not home.get("id") or not away.get("id"):
-                    continue
+            # One cursor for the whole season — commit once at the end
+            with conn.cursor() as cur:
+                for m in matches:
+                    home = m.get("homeTeam", {})
+                    away = m.get("awayTeam", {})
+                    if not home.get("id") or not away.get("id"):
+                        continue
 
-                kickoff = m.get("utcDate")
-                if not kickoff or len(kickoff) < 10:
-                    continue
+                    kickoff = m.get("utcDate")
+                    if not kickoff or len(kickoff) < 10:
+                        continue
 
-                home_local = upsert_team(conn, home["id"], home["name"], local_league_id)
-                away_local = upsert_team(conn, away["id"], away["name"], local_league_id)
+                    home_local = upsert_team(conn, cur, home["id"], home["name"], local_league_id)
+                    away_local = upsert_team(conn, cur, away["id"], away["name"], local_league_id)
 
-                matchday = m.get("matchday")
-                season_label = str(season)
+                    matchday = m.get("matchday")
+                    season_label = str(season)
 
-                fixture_local = upsert_fixture(
-                    conn, m["id"], home_local, away_local,
-                    local_league_id, kickoff, season_label, matchday
-                )
+                    fixture_local = upsert_fixture(
+                        conn, cur, m["id"], home_local, away_local,
+                        local_league_id, kickoff, season_label, matchday
+                    )
 
-                # Save result if finished
-                if m.get("status") == "FINISHED":
-                    score = m.get("score", {})
-                    ft = score.get("fullTime", {})
-                    ht = score.get("halfTime", {})
-                    if ft.get("home") is not None and ft.get("away") is not None:
-                        upsert_result(
-                            conn, fixture_local,
-                            ft["home"], ft["away"],
-                            ht.get("home"), ht.get("away")
-                        )
+                    if m.get("status") == "FINISHED":
+                        score = m.get("score", {})
+                        ft = score.get("fullTime", {})
+                        ht = score.get("halfTime", {})
+                        if ft.get("home") is not None and ft.get("away") is not None:
+                            upsert_result(
+                                cur, fixture_local,
+                                ft["home"], ft["away"],
+                                ht.get("home"), ht.get("away")
+                            )
+
+            conn.commit()
+            print(f"  Committed {league_name} {season}")
 
     conn.close()
     print("football-data sync complete")
