@@ -53,6 +53,13 @@ _FIXTURE_JOINS = """
 """
 
 
+# ── Health check ──────────────────────────────────────────────────────────────
+
+@app.get("/")
+def health():
+    return {"status": "ok"}
+
+
 # ── Leagues ───────────────────────────────────────────────────────────────────
 
 @app.get("/leagues")
@@ -402,6 +409,7 @@ def get_picks(
     conn=Depends(get_db),
 ):
     today = date.today()
+    bt = bet_type.upper()
 
     if saturday3pm:
         days_until_sat = (5 - today.weekday()) % 7
@@ -416,6 +424,36 @@ def get_picks(
         where  = "WHERE f.kickoff_time::date >= %s AND f.kickoff_time::date <= %s AND r.fixture_id IS NULL"
         params = [df, dt]
 
+    # Try pre-computed scores first (populated nightly by build_fixture_scores.py)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {_FIXTURE_COLS},
+                       fs.score, fs.pick, fs.reasoning
+                {_FIXTURE_JOINS}
+                JOIN fixture_scores fs ON fs.fixture_id = f.id AND fs.bet_type = %s
+                {where}
+                ORDER BY fs.score DESC
+                """,
+                [bt] + params,
+            )
+            rows = cur.fetchall()
+
+        if rows:
+            import json as _json
+            results = []
+            for r in rows:
+                row = dict(r)
+                if isinstance(row.get("reasoning"), str):
+                    row["reasoning"] = _json.loads(row["reasoning"])
+                row["bet_type"] = bt
+                results.append(row)
+            return results
+    except Exception:
+        pass  # fixture_scores table may not exist yet — fall through to live scoring
+
+    # Fall back: compute live from team_form (used until first nightly score run)
     with conn.cursor() as cur:
         cur.execute(
             f"SELECT {_FIXTURE_COLS} {_FIXTURE_JOINS} {where} ORDER BY f.kickoff_time",
@@ -438,18 +476,17 @@ def get_picks(
         if not hf or not af:
             continue
 
-        # Inject team names for use inside scorer
         hf = dict(hf); hf["home_team"] = f["home_team"]
         af = dict(af); af["away_team"] = f["away_team"]
 
-        score, reasoning, pick = _score_fixture(bet_type.upper(), hf, af)
+        score, reasoning, pick = _score_fixture(bt, hf, af)
 
         results.append({
             **dict(f),
             "score":     score,
             "reasoning": reasoning,
             "pick":      pick,
-            "bet_type":  bet_type.upper(),
+            "bet_type":  bt,
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)

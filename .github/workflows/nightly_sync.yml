@@ -52,3 +52,8 @@ jobs:
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
         run: python scripts/build_form_cache.py
+
+      - name: Build fixture scores
+        env:
+          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+        run: python scripts/build_fixture_scores.py
