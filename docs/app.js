@@ -17,6 +17,14 @@ const state = {
   picksBetType:    'BTTS',
   picksDateFilter: 'week',
   picksScoreMap:   {},        // fixtureId -> score, populated silently on fixtures load
+  // Detail view
+  detail:          null,      // the fixture object being viewed
+  detailHomeForm:  null,
+  detailAwayForm:  null,
+  detailH2H:       null,
+  detailScores:    null,
+  detailLoading:   false,
+  // Coupon analysis
   analysis:        null,
   analysisLoading: false,
   analysisOpen:    false,
@@ -342,6 +350,12 @@ function setView(v) {
   }
 }
 
+function backFromDetail() {
+  state.view   = 'fixtures';
+  state.detail = null;
+  render();
+}
+
 function updateApiBase(url) {
   API_BASE = url.trim().replace(/\/$/, '');
   localStorage.setItem('api_base', API_BASE);
@@ -655,6 +669,143 @@ function renderCouponView() {
   return html;
 }
 
+function renderDetailView() {
+  const f = state.detail;
+  if (!f) return '';
+
+  const sel = inCoupon(f.id);
+  const completed = f.home_goals !== null && f.home_goals !== undefined;
+
+  // ── Header ──
+  const scoreOrTime = completed
+    ? `<span class="detail-score">${f.home_goals} &ndash; ${f.away_goals}</span>`
+    : `<span class="detail-kickoff">${esc(fmtTime(f.kickoff_time))}</span>`;
+
+  let html = `
+    <div class="detail-header">
+      <button class="detail-back" onclick="backFromDetail()">&#8592; Back</button>
+      <div class="detail-teams-row">
+        <div class="detail-team home">
+          <div class="detail-badge">${esc(f.home_team.substring(0,3).toUpperCase())}</div>
+          <div class="detail-team-name">${esc(f.home_team)}</div>
+        </div>
+        ${scoreOrTime}
+        <div class="detail-team away">
+          <div class="detail-badge">${esc(f.away_team.substring(0,3).toUpperCase())}</div>
+          <div class="detail-team-name">${esc(f.away_team)}</div>
+        </div>
+      </div>
+      <div class="detail-meta">${esc(f.league_name)} &middot; ${esc(fmtDate(f.kickoff_time))}</div>
+    </div>`;
+
+  // ── Add to coupon ──
+  if (!completed) {
+    html += `
+      <div class="detail-coupon-row">
+        <select class="market-select detail-market-select" id="detail-market-sel">
+          ${marketOptions(inCoupon(f.id) ? (state.coupon.find(p => p.fixtureId === f.id)?.market || '1') : '1')}
+        </select>
+        <button class="detail-add-btn${sel ? ' added' : ''}" onclick="detailAddToCoupon()">
+          ${sel ? '&#10003; In Coupon' : '+ Add to Coupon'}
+        </button>
+      </div>`;
+  }
+
+  if (state.detailLoading) {
+    html += '<div class="loading">Loading match data&hellip;</div>';
+    return html;
+  }
+
+  // ── Bet scores ──
+  if (state.detailScores && Object.keys(state.detailScores).length) {
+    html += '<div class="detail-section-title">Bet Scores</div><div class="detail-scores-grid">';
+    for (const [bt, info] of Object.entries(state.detailScores)) {
+      const label = BET_TYPES[bt] || bt;
+      const sc = info.score;
+      const color = sc >= 70 ? 'var(--accent)' : sc >= 45 ? 'var(--warning)' : 'var(--danger)';
+      const pickLabel = info.pick ? ` &middot; <strong>${info.pick === 'home' ? esc(f.home_team) : esc(f.away_team)}</strong>` : '';
+      html += `
+        <div class="detail-score-card">
+          <div class="detail-score-top">
+            <span class="detail-score-label">${esc(label)}</span>
+            <span class="detail-score-num" style="color:${color}">${sc}</span>
+          </div>
+          <div class="detail-score-bar-wrap">
+            <div class="detail-score-bar-fill" style="width:${sc}%;background:${color}"></div>
+          </div>
+          ${pickLabel ? `<div class="detail-score-pick">${pickLabel}</div>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+
+    // ── Reasoning from top bet type by score ──
+    const topBt = Object.entries(state.detailScores).sort((a,b) => b[1].score - a[1].score)[0];
+    if (topBt && topBt[1].reasoning?.length) {
+      html += `<div class="detail-section-title">Insights &mdash; ${esc(BET_TYPES[topBt[0]] || topBt[0])}</div>
+        <div class="detail-insights">`;
+      for (const line of topBt[1].reasoning) {
+        html += `<div class="detail-insight-row">${esc(line)}</div>`;
+      }
+      html += '</div>';
+    }
+  }
+
+  // ── Team form ──
+  const hf = state.detailHomeForm;
+  const af = state.detailAwayForm;
+  if (hf || af) {
+    html += '<div class="detail-section-title">Recent Form (last 5)</div><div class="detail-form-section">';
+    for (const [team, tf] of [[f.home_team, hf], [f.away_team, af]]) {
+      if (!tf) continue;
+      html += `
+        <div class="detail-form-row">
+          <span class="detail-form-team">${esc(team)}</span>
+          <span class="detail-form-chars">${formGuide(tf.form_string || '')}</span>
+          <span class="detail-form-stats">${tf.wins}W ${tf.draws}D ${tf.losses}L &middot; ${tf.goals_scored} scored ${tf.goals_conceded} conceded</span>
+        </div>`;
+    }
+    html += '</div>';
+  }
+
+  // ── H2H ──
+  const h2h = state.detailH2H;
+  if (h2h && h2h.meetings > 0) {
+    html += `
+      <div class="detail-section-title">Head to Head (${h2h.meetings} meetings)</div>
+      <div class="detail-h2h">
+        <div class="h2h-bar-wrap">
+          <div class="h2h-segment home" style="flex:${h2h.home_wins}">${h2h.home_wins}W</div>
+          <div class="h2h-segment draw" style="flex:${h2h.draws}">${h2h.draws}D</div>
+          <div class="h2h-segment away" style="flex:${h2h.away_wins}">${h2h.away_wins}W</div>
+        </div>
+        <div class="h2h-labels">
+          <span>${esc(f.home_team)}</span>
+          <span>Draw</span>
+          <span>${esc(f.away_team)}</span>
+        </div>
+        <div class="h2h-goals">${h2h.home_goals} goals &mdash; ${h2h.away_goals} goals</div>
+      </div>`;
+  }
+
+  return html;
+}
+
+function detailAddToCoupon() {
+  const f = state.detail;
+  if (!f) return;
+  const market = document.getElementById('detail-market-sel')?.value || '1';
+  if (inCoupon(f.id)) {
+    state.coupon = state.coupon.filter(p => p.fixtureId !== f.id);
+  } else {
+    state.coupon.push({
+      fixtureId: f.id, homeTeam: f.home_team, awayTeam: f.away_team,
+      kickoffTime: f.kickoff_time, leagueName: f.league_name, market,
+    });
+  }
+  saveCoupon();
+  render();
+}
+
 function renderSettingsView() {
   return `
     <div class="settings-section">
@@ -726,6 +877,12 @@ function renderFilterBar() {
 
 // ── Main render ───────────────────────────────────────────────────────────────
 function render() {
+  const isDetail = state.view === 'detail';
+
+  // Nav — hide on detail view
+  const nav = document.querySelector('.bottom-nav');
+  if (nav) nav.style.display = isDetail ? 'none' : '';
+
   // Nav active state
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.view === state.view);
@@ -735,36 +892,65 @@ function render() {
   const pip = document.getElementById('nav-pip');
   if (pip) pip.classList.toggle('visible', state.coupon.length > 0);
 
-  // Header badge (shows count on non-coupon views)
+  // Header badge
   const badge = document.getElementById('header-badge');
   if (badge) {
     badge.textContent = state.coupon.length;
     badge.classList.toggle('visible', state.coupon.length > 0);
   }
 
-  // Filter bar (fixtures only)
+  // Filter bar (fixtures only, not on detail)
   const filterArea = document.getElementById('filter-area');
-  if (filterArea) filterArea.innerHTML = renderFilterBar();
+  if (filterArea) filterArea.innerHTML = isDetail ? '' : renderFilterBar();
 
-  // Main content
+  // Main content — no bottom padding on detail (no nav)
   const main = document.getElementById('main-content');
   if (!main) return;
+  main.style.paddingBottom = isDetail ? '24px' : '';
+
   if      (state.view === 'fixtures') main.innerHTML = renderFixturesView();
   else if (state.view === 'picks')    main.innerHTML = renderPicksView();
   else if (state.view === 'coupon')   main.innerHTML = renderCouponView();
+  else if (state.view === 'detail')   main.innerHTML = renderDetailView();
   else if (state.view === 'settings') main.innerHTML = renderSettingsView();
 }
 
 // ── Global handlers (called from inline onclick) ───────────────────────────────
 function handleCardTap(id) {
   const fixture = state.fixtures.find(f => f.id === id);
-  if (fixture) addToCoupon(fixture);
+  if (fixture) openDetail(fixture);
 }
 
 function handleAddBtn(event, id) {
   event.stopPropagation();
   const fixture = state.fixtures.find(f => f.id === id);
   if (fixture) addToCoupon(fixture);
+}
+
+async function openDetail(fixture) {
+  state.detail        = fixture;
+  state.detailHomeForm = null;
+  state.detailAwayForm = null;
+  state.detailH2H      = null;
+  state.detailScores   = null;
+  state.detailLoading  = true;
+  setView('detail');
+
+  try {
+    const [hForm, aForm, h2h, scores] = await Promise.all([
+      apiFetch(`/teams/${fixture.home_team_id}/form`).catch(() => null),
+      apiFetch(`/teams/${fixture.away_team_id}/form`).catch(() => null),
+      apiFetch(`/fixtures/${fixture.id}/h2h`).catch(() => null),
+      apiFetch(`/fixtures/${fixture.id}/scores`).catch(() => null),
+    ]);
+    state.detailHomeForm = hForm;
+    state.detailAwayForm = aForm;
+    state.detailH2H      = h2h;
+    state.detailScores   = scores;
+  } catch (_) {}
+
+  state.detailLoading = false;
+  render();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

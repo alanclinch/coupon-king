@@ -192,6 +192,56 @@ def get_h2h(fixture_id: int, conn=Depends(get_db)):
     return result
 
 
+# ── Fixture scores (all bet types) ────────────────────────────────────────────
+
+@app.get("/fixtures/{fixture_id}/scores")
+def get_fixture_scores(fixture_id: int, conn=Depends(get_db)):
+    import json as _json
+    # Try pre-computed scores first
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT bet_type, score, pick, reasoning FROM fixture_scores WHERE fixture_id = %s",
+                (fixture_id,),
+            )
+            rows = cur.fetchall()
+        if rows:
+            out = {}
+            for r in rows:
+                reasoning = r["reasoning"]
+                if isinstance(reasoning, str):
+                    reasoning = _json.loads(reasoning)
+                out[r["bet_type"]] = {"score": r["score"], "pick": r["pick"], "reasoning": reasoning}
+            return out
+    except Exception:
+        pass
+
+    # Fall back: compute live
+    with conn.cursor() as cur:
+        cur.execute("SELECT home_team_id, away_team_id FROM fixtures WHERE id = %s", (fixture_id,))
+        fixture = cur.fetchone()
+    if not fixture:
+        raise HTTPException(status_code=404, detail="Fixture not found")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM team_form WHERE team_id IN (%s, %s)",
+            (fixture["home_team_id"], fixture["away_team_id"]),
+        )
+        forms = {r["team_id"]: r for r in cur.fetchall()}
+
+    hf = forms.get(fixture["home_team_id"])
+    af = forms.get(fixture["away_team_id"])
+    if not hf or not af:
+        return {}
+
+    out = {}
+    for bt in ["BTTS", "OVER25", "WIN", "BTTS_WIN", "BTTS_NODRAW", "BTTS_OVER25"]:
+        score, reasoning, pick = _score_fixture(bt, dict(hf), dict(af))
+        out[bt] = {"score": score, "pick": pick, "reasoning": reasoning}
+    return out
+
+
 # ── Coupon check ──────────────────────────────────────────────────────────────
 
 class CouponSelection(BaseModel):
