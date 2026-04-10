@@ -16,6 +16,7 @@ const state = {
   picksLoaded:     false,
   picksBetType:    'BTTS',
   picksDateFilter: 'week',
+  picksScoreMap:   {},        // fixtureId -> score, populated silently on fixtures load
   analysis:        null,
   analysisLoading: false,
   analysisOpen:    false,
@@ -98,6 +99,35 @@ async function loadFixtures() {
 
   state.loading = false;
   render();
+
+  // Silently load scores in background so fixture cards show quality signals
+  loadPicksScores();
+}
+
+async function loadPicksScores() {
+  try {
+    const p = new URLSearchParams();
+    p.set('bet_type', state.picksBetType);
+    if (state.dateFilter === 'sat3pm') {
+      p.set('saturday3pm', 'true');
+    } else {
+      if (state.dateFilter === 'today') {
+        p.set('date_from', isoDateOffset(0)); p.set('date_to', isoDateOffset(0));
+      } else if (state.dateFilter === 'tomorrow') {
+        p.set('date_from', isoDateOffset(1)); p.set('date_to', isoDateOffset(1));
+      } else {
+        p.set('date_from', isoDateOffset(0)); p.set('date_to', isoDateOffset(7));
+      }
+    }
+    const picks = await apiFetch(`/picks?${p}`);
+    state.picksScoreMap = {};
+    for (const pick of picks) {
+      state.picksScoreMap[pick.id] = { score: pick.score, pick: pick.pick, bet_type: pick.bet_type };
+    }
+    if (state.view === 'fixtures') render();
+  } catch (_) {
+    // Non-fatal — scores just won't show
+  }
 }
 
 async function loadPicks() {
@@ -173,6 +203,52 @@ function clearCoupon() {
   state.coupon = [];
   state.analysis = null;
   state.analysisOpen = false;
+  saveCoupon();
+  render();
+}
+
+function setAllMarkets(market) {
+  if (!market) return;
+  state.coupon.forEach(p => { p.market = market; });
+  saveCoupon();
+  render();
+}
+
+function smartFill() {
+  // Take top 5 scored upcoming fixtures, add to coupon with appropriate market
+  const marketMap = {
+    'BTTS':        'BTTS_YES',
+    'OVER25':      'OVER25',
+    'WIN':         null,  // handled per-pick using pick.pick
+    'BTTS_WIN':    null,
+    'BTTS_NODRAW': 'BTTS_YES',
+    'BTTS_OVER25': 'BTTS_YES',
+  };
+
+  const sorted = Object.entries(state.picksScoreMap)
+    .sort((a, b) => b[1].score - a[1].score)
+    .slice(0, 5);
+
+  for (const [idStr, info] of sorted) {
+    const id = parseInt(idStr, 10);
+    if (inCoupon(id)) continue;
+    const fixture = state.fixtures.find(f => f.id === id);
+    if (!fixture) continue;
+
+    let market = marketMap[info.bet_type] || 'BTTS_YES';
+    if (info.bet_type === 'WIN' || info.bet_type === 'BTTS_WIN') {
+      market = info.pick === 'home' ? '1' : info.pick === 'away' ? '2' : '1';
+    }
+
+    state.coupon.push({
+      fixtureId:   fixture.id,
+      homeTeam:    fixture.home_team,
+      awayTeam:    fixture.away_team,
+      kickoffTime: fixture.kickoff_time,
+      leagueName:  fixture.league_name,
+      market,
+    });
+  }
   saveCoupon();
   render();
 }
@@ -347,7 +423,18 @@ function renderFixturesView() {
 
   const sortedDays = Object.keys(days).sort();
 
-  let html = '<div class="fixtures-list">';
+  // Smart Fill button — only show if we have scores
+  const scoredCount = Object.keys(state.picksScoreMap).length;
+  let html = '';
+  if (scoredCount > 0) {
+    html += `
+      <div class="smart-fill-bar">
+        <span class="smart-fill-label">Scored ${scoredCount} fixtures &middot; ${BET_TYPES[state.picksBetType] || state.picksBetType}</span>
+        <button class="smart-fill-btn" onclick="smartFill()">&#9733; Smart Fill Top 5</button>
+      </div>`;
+  }
+
+  html += '<div class="fixtures-list">';
   for (const day of sortedDays) {
     const dayDate = new Date(day + 'T12:00:00Z');
     const dayLabel = dayDate.toLocaleDateString('en-GB', {
@@ -370,20 +457,34 @@ function renderFixturesView() {
           : `<span class="vs-sep">vs</span>`;
         const classes   = ['fixture-card', sel ? 'selected' : '', completed ? 'completed' : ''].filter(Boolean).join(' ');
 
+        const scoreInfo = !completed && state.picksScoreMap[f.id];
+        const scoreColor = scoreInfo
+          ? (scoreInfo.score >= 70 ? 'var(--accent)' : scoreInfo.score >= 45 ? 'var(--warning)' : 'var(--danger)')
+          : null;
+        const scoreBadge = scoreInfo
+          ? `<span class="fixture-score-badge" style="color:${scoreColor};border-color:${scoreColor}">${scoreInfo.score}</span>`
+          : '';
+
         html += `
           <div class="${classes}"${!completed ? ` onclick="handleCardTap(${f.id})"` : ''} style="${!completed ? 'cursor:pointer' : ''}">
-            <div class="fixture-main">
-              <div class="fixture-meta">
-                <span class="fixture-time">${esc(fmtDate(f.kickoff_time))} &middot; ${esc(fmtTime(f.kickoff_time))}</span>
-                <span class="fixture-tick" aria-label="Selected">&#10003;</span>
+            ${scoreInfo ? `<div class="fixture-score-bar" style="background:${scoreColor};width:${scoreInfo.score}%"></div>` : ''}
+            <div class="fixture-row">
+              <div class="fixture-main">
+                <div class="fixture-meta">
+                  <span class="fixture-time">${esc(fmtDate(f.kickoff_time))} &middot; ${esc(fmtTime(f.kickoff_time))}</span>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    ${scoreBadge}
+                    <span class="fixture-tick" aria-label="Selected">&#10003;</span>
+                  </div>
+                </div>
+                <div class="fixture-teams">
+                  <span class="team-name home">${esc(f.home_team)}</span>
+                  ${middle}
+                  <span class="team-name away">${esc(f.away_team)}</span>
+                </div>
               </div>
-              <div class="fixture-teams">
-                <span class="team-name home">${esc(f.home_team)}</span>
-                ${middle}
-                <span class="team-name away">${esc(f.away_team)}</span>
-              </div>
+              ${!completed ? `<button class="add-btn${sel ? ' added' : ''}" onclick="handleAddBtn(event,${f.id})" aria-label="${sel ? 'Remove from coupon' : 'Add to coupon'}">${sel ? '&#10003;' : '+'}</button>` : ''}
             </div>
-            ${!completed ? `<button class="add-btn${sel ? ' added' : ''}" onclick="handleAddBtn(event,${f.id})" aria-label="${sel ? 'Remove from coupon' : 'Add to coupon'}">${sel ? '&#10003;' : '+'}</button>` : ''}
           </div>`;
       }
     }
@@ -469,7 +570,17 @@ function renderCouponView() {
       </div>`;
   }
 
-  let html = `<div class="section-label">${state.coupon.length} selection${state.coupon.length !== 1 ? 's' : ''}</div>`;
+  let html = `
+    <div class="coupon-bulk-bar">
+      <span class="coupon-bulk-label">${state.coupon.length} selection${state.coupon.length !== 1 ? 's' : ''}</span>
+      <div class="coupon-bulk-right">
+        <span class="coupon-bulk-hint">Set all:</span>
+        <select class="market-select bulk-market-select" onchange="setAllMarkets(this.value)">
+          <option value="">— pick —</option>
+          ${Object.entries(MARKETS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
   html += '<div class="coupon-picks">';
 
   for (const pick of state.coupon) {

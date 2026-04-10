@@ -177,6 +177,43 @@ main {
   min-width: 0;
 }
 
+/* ── Coupon bulk market setter ─────────────────────────────────────────────── */
+.coupon-bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+
+.coupon-bulk-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.coupon-bulk-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.coupon-bulk-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.bulk-market-select {
+  width: auto;
+  padding: 6px 30px 6px 10px;
+  font-size: 13px;
+}
+
 .fixture-meta {
   display: flex;
   justify-content: space-between;
@@ -614,8 +651,61 @@ main {
   font-size: 14px;
 }
 
+/* ── Smart Fill bar ────────────────────────────────────────────────────────── */
+.smart-fill-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(0, 200, 83, 0.06);
+  border-bottom: 1px solid rgba(0, 200, 83, 0.15);
+  gap: 10px;
+}
+
+.smart-fill-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.smart-fill-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #000;
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.smart-fill-btn:active { opacity: 0.8; }
+
+/* ── Fixture score bar & badge ─────────────────────────────────────────────── */
+.fixture-score-bar {
+  height: 3px;
+  opacity: 0.5;
+  transition: width 0.4s ease;
+}
+
+.fixture-score-badge {
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 1px 6px;
+  line-height: 1.4;
+}
+
 /* ── Fixture card + button ─────────────────────────────────────────────────── */
 .fixture-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.fixture-row {
   display: flex;
   align-items: stretch;
 }
