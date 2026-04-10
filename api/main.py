@@ -1,6 +1,6 @@
 import os
 from datetime import date, timedelta
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import psycopg2
 import psycopg2.extras
@@ -291,3 +291,166 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
         })
 
     return output
+
+
+# ── Smart Picks ───────────────────────────────────────────────────────────────
+
+def _rate(num: int, den: int) -> float:
+    return num / den if den > 0 else 0.0
+
+
+def _score_fixture(bet_type: str, hf: dict, af: dict) -> Tuple[int, list, Optional[str]]:
+    """Return (score 0-100, reasoning lines, pick 'home'|'away'|None)."""
+    hp = hf["played"] or 1
+    ap = af["played"] or 1
+
+    h_win   = _rate(hf["wins"],         hp)
+    h_draw  = _rate(hf["draws"],        hp)
+    h_loss  = _rate(hf["losses"],       hp)
+    h_att   = _rate(hf["goals_scored"], hp)
+    h_def   = _rate(hf["goals_conceded"], hp)
+    h_cs    = _rate(hf["clean_sheets"], hp)
+
+    a_win   = _rate(af["wins"],         ap)
+    a_draw  = _rate(af["draws"],        ap)
+    a_loss  = _rate(af["losses"],       ap)
+    a_att   = _rate(af["goals_scored"], ap)
+    a_def   = _rate(af["goals_conceded"], ap)
+    a_cs    = _rate(af["clean_sheets"], ap)
+
+    hn = hf["home_team"] if "home_team" in hf else "Home"
+    an = af["away_team"] if "away_team" in af else "Away"
+
+    if bet_type == "BTTS":
+        raw = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
+        score = min(100, round(raw * 50))
+        reasons = [
+            f"Home scores {h_att:.1f} goals/game, concedes {h_def:.1f}",
+            f"Away scores {a_att:.1f} goals/game, concedes {a_def:.1f}",
+        ]
+        if h_cs >= 0.6: reasons.append(f"Caution: home kept {hf['clean_sheets']} clean sheets in last {hp}")
+        if a_cs >= 0.6: reasons.append(f"Caution: away kept {af['clean_sheets']} clean sheets in last {ap}")
+        return score, reasons, None
+
+    elif bet_type == "OVER25":
+        avg = ((h_att + h_def) + (a_att + a_def)) / 2
+        score = max(0, min(100, round((avg - 1.5) / 2.5 * 100)))
+        reasons = [
+            f"Home avg {h_att + h_def:.1f} goals/game (scored + conceded)",
+            f"Away avg {a_att + a_def:.1f} goals/game (scored + conceded)",
+            f"Combined average: {avg:.1f} goals/game",
+        ]
+        return score, reasons, None
+
+    elif bet_type == "WIN":
+        h_strength = (h_win + a_loss) / 2
+        a_strength = (a_win + h_loss) / 2
+        if h_strength >= a_strength:
+            score = min(100, round(h_strength * 100))
+            reasons = [f"Home: {hf['wins']}W {hf['draws']}D {hf['losses']}L in last {hp}",
+                       f"Away: {af['wins']}W {af['draws']}D {af['losses']}L in last {ap}"]
+            return score, reasons, "home"
+        else:
+            score = min(100, round(a_strength * 100))
+            reasons = [f"Away: {af['wins']}W {af['draws']}D {af['losses']}L in last {ap}",
+                       f"Home: {hf['wins']}W {hf['draws']}D {hf['losses']}L in last {hp}"]
+            return score, reasons, "away"
+
+    elif bet_type == "BTTS_WIN":
+        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
+        h_strength = (h_win + a_loss) / 2
+        a_strength = (a_win + h_loss) / 2
+        pick = "home" if h_strength >= a_strength else "away"
+        win_s = h_strength if pick == "home" else a_strength
+        score = min(100, round((btts + win_s) / 2 * 80))
+        reasons = [
+            f"BTTS: home scores {h_att:.1f}/game, away scores {a_att:.1f}/game",
+            f"Likely winner: {'home' if pick=='home' else 'away'} ({hf['wins']}W vs {af['wins']}W in last 5)",
+        ]
+        return score, reasons, pick
+
+    elif bet_type == "BTTS_NODRAW":
+        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
+        no_draw = 1 - (h_draw + a_draw) / 2
+        score = min(100, round(btts * no_draw * 80))
+        reasons = [
+            f"Home scores {h_att:.1f}/game, draw rate {round(h_draw*100)}%",
+            f"Away scores {a_att:.1f}/game, draw rate {round(a_draw*100)}%",
+        ]
+        return score, reasons, None
+
+    elif bet_type == "BTTS_OVER25":
+        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
+        avg = ((h_att + h_def) + (a_att + a_def)) / 2
+        over25 = max(0.0, min(1.0, (avg - 1.5) / 2.5))
+        score = min(100, round((btts + over25) / 2 * 80))
+        reasons = [
+            f"Home scores {h_att:.1f}/game, away scores {a_att:.1f}/game",
+            f"Combined avg {avg:.1f} goals/game",
+        ]
+        return score, reasons, None
+
+    return 0, [], None
+
+
+@app.get("/picks")
+def get_picks(
+    bet_type: str = "BTTS",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    saturday3pm: bool = False,
+    conn=Depends(get_db),
+):
+    today = date.today()
+
+    if saturday3pm:
+        days_until_sat = (5 - today.weekday()) % 7
+        saturday = today + timedelta(days=days_until_sat)
+        where  = """WHERE f.kickoff_time::date = %s
+          AND EXTRACT(hour FROM f.kickoff_time AT TIME ZONE 'UTC') IN (13, 14, 15)
+          AND r.fixture_id IS NULL"""
+        params: list = [saturday]
+    else:
+        df = date_from or today.isoformat()
+        dt = date_to or (today + timedelta(days=7)).isoformat()
+        where  = "WHERE f.kickoff_time::date >= %s AND f.kickoff_time::date <= %s AND r.fixture_id IS NULL"
+        params = [df, dt]
+
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {_FIXTURE_COLS} {_FIXTURE_JOINS} {where} ORDER BY f.kickoff_time",
+            params,
+        )
+        fixtures = cur.fetchall()
+
+    if not fixtures:
+        return []
+
+    team_ids = list({f["home_team_id"] for f in fixtures} | {f["away_team_id"] for f in fixtures})
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM team_form WHERE team_id = ANY(%s)", (team_ids,))
+        forms = {r["team_id"]: r for r in cur.fetchall()}
+
+    results = []
+    for f in fixtures:
+        hf = forms.get(f["home_team_id"])
+        af = forms.get(f["away_team_id"])
+        if not hf or not af:
+            continue
+
+        # Inject team names for use inside scorer
+        hf = dict(hf); hf["home_team"] = f["home_team"]
+        af = dict(af); af["away_team"] = f["away_team"]
+
+        score, reasoning, pick = _score_fixture(bet_type.upper(), hf, af)
+
+        results.append({
+            **dict(f),
+            "score":     score,
+            "reasoning": reasoning,
+            "pick":      pick,
+            "bet_type":  bet_type.upper(),
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results
