@@ -686,12 +686,10 @@ function renderDetailView() {
       <button class="detail-back" onclick="backFromDetail()">&#8592; Back</button>
       <div class="detail-teams-row">
         <div class="detail-team home">
-          <div class="detail-badge">${esc(f.home_team.substring(0,3).toUpperCase())}</div>
           <div class="detail-team-name">${esc(f.home_team)}</div>
         </div>
         ${scoreOrTime}
         <div class="detail-team away">
-          <div class="detail-badge">${esc(f.away_team.substring(0,3).toUpperCase())}</div>
           <div class="detail-team-name">${esc(f.away_team)}</div>
         </div>
       </div>

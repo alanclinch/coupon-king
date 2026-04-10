@@ -214,7 +214,7 @@ def get_fixture_scores(fixture_id: int, conn=Depends(get_db)):
                 out[r["bet_type"]] = {"score": r["score"], "pick": r["pick"], "reasoning": reasoning}
             return out
     except Exception:
-        pass
+        conn.rollback()
 
     # Fall back: compute live
     with conn.cursor() as cur:
@@ -501,7 +501,7 @@ def get_picks(
                 results.append(row)
             return results
     except Exception:
-        pass  # fixture_scores table may not exist yet — fall through to live scoring
+        conn.rollback()  # fixture_scores may not exist yet — reset tx and fall through
 
     # Fall back: compute live from team_form (used until first nightly score run)
     with conn.cursor() as cur:
