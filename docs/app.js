@@ -711,8 +711,8 @@ function renderCouponView() {
         const scorePct = sc ? `<span class="fixture-score-pct" style="color:${sc}">${r.score}%</span>` : '';
         const flagsHtml = (r.flags && r.flags.length)
           ? r.flags.map((f, fi) => {
-              if (r.risk === 'low') return `<div class="flag-positive">${esc(f)}</div>`;
-              if (fi === 0 && r.risk !== 'low') return `<div class="flag-intro risk-${r.risk}">${esc(f)}</div>`;
+              if (r.risk === 'low') return `<div class="flag-positive" style="color:${sc || 'var(--accent)'}">${esc(f)}</div>`;
+              if (fi === 0) return `<div class="flag-intro risk-${r.risk}">${esc(f)}</div>`;
               return `<div class="flag-item">${esc(f)}</div>`;
             }).join('')
           : '';

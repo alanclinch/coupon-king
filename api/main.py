@@ -452,62 +452,112 @@ def _positive_insight(fixture_id: int, market: str, home_team: str, away_team: s
     ntotal = nh + na
     idx = fixture_id % 3  # vary phrasing per fixture
 
-    if m in ("1",):
+    def _desc_wins(team, count, n, role):
+        """Describe a team's win rate with appropriate tone."""
+        ratio = count / n if n > 0 else 0
+        if ratio >= 0.6:
+            return f"{team} have won {count} of their last {n} {role} games"
+        elif ratio >= 0.4:
+            return f"{team} have won {count} of their last {n} {role} games"
+        elif count == 0:
+            return f"{team} haven't won any of their last {n} {role} games"
+        else:
+            return f"{team} have won only {count} of their last {n} {role} games"
+
+    def _connector(home_ratio, away_ratio, favour_home):
+        """Use 'and' when both point same way, 'but' when there's a contrast."""
+        if favour_home:
+            return "and" if home_ratio >= 0.6 else "but"
+        else:
+            return "and" if away_ratio >= 0.6 else "but"
+
+    hr = hy / nh if nh > 0 else 0
+    ar = ay / na if na > 0 else 0
+
+    if m == "1":
+        h_desc = _desc_wins(home_team, hy, nh, "home")
+        # Away team's away record — low is good for home bet
+        if ay == 0:
+            a_desc = f"{away_team} haven't won away in their last {na} games"
+        elif ar <= 0.2:
+            a_desc = f"{away_team} have won just {ay}/{na} away"
+        else:
+            a_desc = f"{away_team} have won {ay} of {na} away"
+        conn = "and" if hr >= 0.6 or ar <= 0.2 else "but"
         phrases = [
-            f"{home_team} have won {hy} of their last {nh} home games",
-            f"{home_team} are in good home form — {hy} wins from {nh} games",
-            f"{home_team} picked up {hy}/{nh} wins at home recently",
+            f"{h_desc} — {a_desc}",
+            f"{h_desc}, {conn} {a_desc}",
+            f"{a_desc} — {h_desc}",
         ]
-    elif m in ("2",):
+
+    elif m == "2":
+        a_desc = _desc_wins(away_team, ay, na, "away")
+        if hy == 0:
+            h_desc = f"{home_team} haven't won at home in their last {nh} games"
+        elif hr <= 0.2:
+            h_desc = f"{home_team} have won just {hy}/{nh} at home"
+        else:
+            h_desc = f"{home_team} have won {hy} of {nh} at home"
+        conn = "and" if ar >= 0.6 or hr <= 0.2 else "but"
         phrases = [
-            f"{away_team} have won {ay} of their last {na} away games",
-            f"{away_team} are travelling well — {ay} wins from {na} away games",
-            f"{away_team} picked up {ay}/{na} wins on the road recently",
+            f"{a_desc} — {h_desc}",
+            f"{a_desc}, {conn} {h_desc}",
+            f"{h_desc} — {a_desc}",
         ]
+
     elif m == "X":
         phrases = [
             f"These sides have drawn {total} of their last {ntotal} combined games",
-            f"Recent form suggests parity — {total}/{ntotal} draws between them",
-            f"Both sides have shown they can share the points — {total}/{ntotal} recently",
+            f"{home_team} drew {hy}/{nh} at home, {away_team} drew {ay}/{na} away",
+            f"{total} draws across their last {ntotal} combined games",
         ]
+
     elif m == "BTTS_YES":
         phrases = [
+            f"Both teams scored in {hy}/{nh} of {home_team}'s home games and {ay}/{na} of {away_team}'s away games",
+            f"{home_team}: BTTS in {hy}/{nh} home games — {away_team}: BTTS in {ay}/{na} away games",
             f"Between them they've been involved in {total}/{ntotal} BTTS games recently",
-            f"{total} of their last {ntotal} combined games have seen both teams score",
-            f"Both sides have shown a tendency to score — {total}/{ntotal} BTTS in recent games",
         ]
+
     elif m == "OVER25":
         phrases = [
+            f"Over 2.5 goals in {hy}/{nh} of {home_team}'s home games and {ay}/{na} of {away_team}'s away games",
+            f"{home_team}: {hy}/{nh} home games over 2.5 — {away_team}: {ay}/{na} away games over 2.5",
             f"{total} of their last {ntotal} combined games produced over 2.5 goals",
-            f"These sides have been involved in high-scoring games — {total}/{ntotal} over 2.5 recently",
-            f"Over 2.5 goals in {total} of the last {ntotal} combined games",
         ]
+
     elif m == "BTTS_WIN_H":
+        a_losses = na - ay
         phrases = [
-            f"{home_team} scored and won in {hy} of their last {nh} home games",
-            f"{home_team} have delivered Score and Win results in {hy}/{nh} recent home games",
-            f"{home_team} found the net and took all three points in {hy}/{nh} home games recently",
+            f"{home_team} scored and won in {hy}/{nh} home games — {away_team} lost {a_losses}/{na} away",
+            f"{home_team}: Score and Win in {hy}/{nh} home games, {away_team} lost away {a_losses}/{na} times",
+            f"{home_team} delivered Score and Win in {hy}/{nh} home games",
         ]
+
     elif m == "BTTS_WIN_A":
+        h_losses = nh - hy
         phrases = [
-            f"{away_team} scored and won in {ay} of their last {na} away games",
-            f"{away_team} have delivered Score and Win results in {ay}/{na} recent away games",
-            f"{away_team} found the net and took all three points in {ay}/{na} away games recently",
+            f"{away_team} scored and won in {ay}/{na} away games — {home_team} lost {h_losses}/{nh} at home",
+            f"{away_team}: Score and Win in {ay}/{na} away games, {home_team} lost at home {h_losses}/{nh} times",
+            f"{away_team} delivered Score and Win in {ay}/{na} away games",
         ]
+
     elif m == "BTTS_NODRAW":
         phrases = [
-            f"{total} of their last {ntotal} combined games had both teams score with a decisive result",
-            f"Both sides tend to produce open, decisive games — {total}/{ntotal} recently",
+            f"Both teams scored with a decisive result in {hy}/{nh} of {home_team}'s home games and {ay}/{na} of {away_team}'s away games",
             f"Both Score No Draw in {total} of their last {ntotal} combined games",
+            f"{total}/{ntotal} combined recent games: both scored, no draw",
         ]
+
     elif m == "BTTS_OVER25":
         phrases = [
-            f"{total} of their last {ntotal} combined games had both teams score and over 2.5 goals",
-            f"High-scoring, open games — {total}/{ntotal} Both Score Over 2.5 recently",
-            f"Both sides have featured in {total}/{ntotal} Both Score Over 2.5 games recently",
+            f"Both teams scored and over 2.5 goals in {hy}/{nh} of {home_team}'s home games and {ay}/{na} of {away_team}'s away games",
+            f"Both Score Over 2.5 in {total} of their last {ntotal} combined games",
+            f"{total}/{ntotal} combined recent games had both teams score and over 2.5 goals",
         ]
+
     else:
-        phrases = [f"Model sees this as a solid pick — {total}/{ntotal} positive results in recent games"]
+        phrases = [f"{total}/{ntotal} positive results in recent combined games"]
 
     return phrases[idx % len(phrases)]
 
