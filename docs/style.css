@@ -247,6 +247,29 @@ main {
   gap: 8px;
 }
 
+.fixture-team-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fixture-team-col.away {
+  align-items: flex-end;
+}
+
+.fixture-team-pct {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fixture-team-pct.muted {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 .team-name {
   flex: 1;
   font-size: 15px;

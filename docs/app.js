@@ -191,6 +191,8 @@ function addToCoupon(fixture) {
       fixtureId:   fixture.id,
       homeTeam:    fixture.home_team,
       awayTeam:    fixture.away_team,
+      homeTeamId:  fixture.home_team_id,
+      awayTeamId:  fixture.away_team_id,
       kickoffTime: fixture.kickoff_time,
       leagueName:  fixture.league_name,
       market:      '1',
@@ -257,6 +259,8 @@ function smartFill() {
       fixtureId:   fixture.id,
       homeTeam:    fixture.home_team,
       awayTeam:    fixture.away_team,
+      homeTeamId:  fixture.home_team_id,
+      awayTeamId:  fixture.away_team_id,
       kickoffTime: fixture.kickoff_time,
       leagueName:  fixture.league_name,
       market,
@@ -309,6 +313,8 @@ function addPickToCoupon(pickIndex) {
       fixtureId:   pick.id,
       homeTeam:    pick.home_team,
       awayTeam:    pick.away_team,
+      homeTeamId:  pick.home_team_id,
+      awayTeamId:  pick.away_team_id,
       kickoffTime: pick.kickoff_time,
       leagueName:  pick.league_name,
       market,
@@ -507,9 +513,19 @@ function renderFixturesView() {
           ? `<span class="fixture-score-dot" style="background:${sColor}"></span>`
           : '';
 
-        // Directional: color team names, no badge, no bar
-        const homeStyle = (scoreInfo && isDirectional && scoreInfo.pick === 'home') ? ` style="color:${sColor}"` : '';
-        const awayStyle = (scoreInfo && isDirectional && scoreInfo.pick === 'away') ? ` style="color:${sColor}"` : '';
+        // Directional: percentage under each team name
+        let homeProb = '', awayProb = '';
+        if (scoreInfo && isDirectional && scoreInfo.pick) {
+          const pct = scoreInfo.score;
+          const other = 100 - pct;
+          if (scoreInfo.pick === 'home') {
+            homeProb = `<span class="fixture-team-pct" style="color:${sColor}">${pct}%</span>`;
+            awayProb = `<span class="fixture-team-pct muted">${other}%</span>`;
+          } else {
+            homeProb = `<span class="fixture-team-pct muted">${other}%</span>`;
+            awayProb = `<span class="fixture-team-pct" style="color:${sColor}">${pct}%</span>`;
+          }
+        }
 
         html += `
           <div class="${classes}">
@@ -524,9 +540,9 @@ function renderFixturesView() {
                   </div>
                 </div>
                 <div class="fixture-teams">
-                  <span class="team-name home"${homeStyle}>${esc(f.home_team)}</span>
+                  <div class="fixture-team-col">${homeProb}<span class="team-name home">${esc(f.home_team)}</span></div>
                   ${middle}
-                  <span class="team-name away"${awayStyle}>${esc(f.away_team)}</span>
+                  <div class="fixture-team-col away">${awayProb}<span class="team-name away">${esc(f.away_team)}</span></div>
                 </div>
               </div>
               ${!completed ? `<button class="add-btn${sel ? ' added' : ''}" onclick="handleAddBtn(${f.id})" aria-label="${sel ? 'Remove from coupon' : 'Add to coupon'}">${sel ? '&#10003;' : '+'}</button>` : ''}
@@ -574,10 +590,11 @@ function renderPicksView() {
   html += '<div class="picks-list">';
   state.picks.forEach((pick, i) => {
     const sel = inCoupon(pick.id);
-    const scoreColor = pick.score >= 70 ? 'var(--accent)' : pick.score >= 45 ? 'var(--warning)' : 'var(--danger)';
+    const sc = scoreColor(pick.bet_type, pick.score);
     const pickBadge = pick.pick
       ? `<span class="pick-direction ${pick.pick}">${pick.pick === 'home' ? esc(pick.home_team) : esc(pick.away_team)}</span>`
       : '';
+    const betLabel = BET_TYPES[pick.bet_type] || pick.bet_type;
 
     const reasons = (pick.reasoning || []).map(r =>
       `<div class="pick-reason">${esc(r)}</div>`
@@ -586,14 +603,14 @@ function renderPicksView() {
     html += `
       <div class="pick-card">
         <div class="pick-score-bar">
-          <div class="pick-score-fill" style="width:${pick.score}%;background:${scoreColor}"></div>
+          <div class="pick-score-fill" style="width:${pick.score}%;background:${sc}"></div>
         </div>
         <div class="pick-body">
-          <div class="pick-header-row">
+          <div class="pick-header-row" onclick="openDetailFromPick(${i})" style="cursor:pointer">
             <div class="pick-teams">${esc(pick.home_team)} <span class="vs-sep">vs</span> ${esc(pick.away_team)}</div>
-            <div class="pick-score-num" style="color:${scoreColor}">${pick.score}</div>
+            <div class="pick-score-num" style="color:${sc}">${pick.score}</div>
           </div>
-          <div class="pick-sub">${esc(pick.league_name)} &middot; ${esc(fmtDate(pick.kickoff_time))} ${esc(fmtTime(pick.kickoff_time))}</div>
+          <div class="pick-sub">${esc(pick.league_name)} &middot; ${esc(fmtDate(pick.kickoff_time))} ${esc(fmtTime(pick.kickoff_time))} &middot; ${esc(betLabel)}</div>
           ${pickBadge}
           <div class="pick-reasons">${reasons}</div>
           <button class="pick-add-btn${sel ? ' added' : ''}" onclick="addPickToCoupon(${i})">
@@ -633,7 +650,7 @@ function renderCouponView() {
     html += `
       <div class="coupon-pick">
         <div class="pick-header">
-          <div>
+          <div onclick="openDetailFromCoupon(${pick.fixtureId})" style="cursor:pointer;flex:1">
             <div class="pick-match">${esc(pick.homeTeam)} vs ${esc(pick.awayTeam)}</div>
             <div class="pick-meta">${esc(pick.leagueName)} &middot; ${esc(fmtDate(pick.kickoffTime))} ${esc(fmtTime(pick.kickoffTime))}</div>
           </div>
@@ -953,6 +970,34 @@ function render() {
 function handleCardTap(id) {
   const fixture = state.fixtures.find(f => f.id === id);
   if (fixture) openDetail(fixture);
+}
+
+function openDetailFromPick(i) {
+  const pick = state.picks[i];
+  if (!pick) return;
+  openDetail({
+    id:           pick.id,
+    home_team:    pick.home_team,
+    away_team:    pick.away_team,
+    home_team_id: pick.home_team_id,
+    away_team_id: pick.away_team_id,
+    league_name:  pick.league_name,
+    kickoff_time: pick.kickoff_time,
+  });
+}
+
+function openDetailFromCoupon(fixtureId) {
+  const pick = state.coupon.find(p => p.fixtureId === fixtureId);
+  if (!pick) return;
+  openDetail({
+    id:           pick.fixtureId,
+    home_team:    pick.homeTeam,
+    away_team:    pick.awayTeam,
+    home_team_id: pick.homeTeamId,
+    away_team_id: pick.awayTeamId,
+    league_name:  pick.leagueName,
+    kickoff_time: pick.kickoffTime,
+  });
 }
 
 function handleAddBtn(id) {
