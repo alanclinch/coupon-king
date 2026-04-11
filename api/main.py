@@ -1,3 +1,4 @@
+import math
 import os
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
@@ -242,6 +243,148 @@ def get_fixture_scores(fixture_id: int, conn=Depends(get_db)):
     return out
 
 
+# ── Poisson probability model ─────────────────────────────────────────────────
+
+_MAX_GOALS = 9
+
+
+def _poisson(lam: float, k: int) -> float:
+    if lam <= 0:
+        return 1.0 if k == 0 else 0.0
+    return (lam ** k) * math.exp(-lam) / math.factorial(k)
+
+
+def _expected_goals(hf: dict, af: dict) -> Tuple[float, float]:
+    h_ph = hf["played_home"] or 1
+    a_pa = af["played_away"] or 1
+
+    h_att = hf["goals_scored_home"] / h_ph
+    a_def = af["goals_conceded_away"] / a_pa
+    a_att = af["goals_scored_away"] / a_pa
+    h_def = hf["goals_conceded_home"] / h_ph
+
+    lam_h = (h_att + a_def) / 2
+    lam_a = (a_att + h_def) / 2
+
+    lam_h = max(0.3, min(4.0, lam_h))
+    lam_a = max(0.3, min(4.0, lam_a))
+
+    # Recent form modifier (±15% max)
+    h_total = hf["played"] or 1
+    a_total = af["played"] or 1
+    if hf["recent_played"] >= 5:
+        modifier = 1.0 + (hf["recent_wins"] / hf["recent_played"] - hf["wins"] / h_total) * 0.5
+        lam_h *= max(0.85, min(1.15, modifier))
+    if af["recent_played"] >= 5:
+        modifier = 1.0 + (af["recent_wins"] / af["recent_played"] - af["wins"] / a_total) * 0.5
+        lam_a *= max(0.85, min(1.15, modifier))
+
+    return lam_h, lam_a
+
+
+def _match_probs(lam_h: float, lam_a: float) -> dict:
+    p_hw = p_draw = p_aw = p_btts = p_over25 = 0.0
+    p_btts_hw = p_btts_aw = p_btts_over25 = 0.0
+
+    for i in range(_MAX_GOALS + 1):
+        ph = _poisson(lam_h, i)
+        for j in range(_MAX_GOALS + 1):
+            pa = _poisson(lam_a, j)
+            p = ph * pa
+            if i > j:   p_hw += p
+            elif i == j: p_draw += p
+            else:        p_aw += p
+            if i > 0 and j > 0:
+                p_btts += p
+                if i > j: p_btts_hw += p
+                elif i < j: p_btts_aw += p
+            if i + j > 2: p_over25 += p
+            if i > 0 and j > 0 and i + j > 2: p_btts_over25 += p
+
+    return {
+        "p_hw": p_hw, "p_draw": p_draw, "p_aw": p_aw,
+        "p_btts": p_btts, "p_over25": p_over25,
+        "p_btts_hw": p_btts_hw, "p_btts_aw": p_btts_aw,
+        "p_btts_nodraw": p_btts_hw + p_btts_aw,
+        "p_btts_over25": p_btts_over25,
+    }
+
+
+def _score_fixture(bet_type: str, hf: dict, af: dict) -> Tuple[int, list, Optional[str]]:
+    """Return (score 0-100, reasoning lines, pick 'home'|'away'|None)."""
+    h_ph = hf["played_home"] or 1
+    a_pa = af["played_away"] or 1
+    hist_btts = (hf["btts_home"] / h_ph + af["btts_away"] / a_pa) / 2
+    hist_over25 = (hf["over25_home"] / h_ph + af["over25_away"] / a_pa) / 2
+
+    lam_h, lam_a = _expected_goals(hf, af)
+    p = _match_probs(lam_h, lam_a)
+
+    if bet_type == "BTTS":
+        prob = 0.7 * p["p_btts"] + 0.3 * hist_btts
+        return round(prob * 100), [
+            f"Home scores {hf['goals_scored_home']/h_ph:.1f}/game at home, concedes {hf['goals_conceded_home']/h_ph:.1f}",
+            f"Away scores {af['goals_scored_away']/a_pa:.1f}/game away, concedes {af['goals_conceded_away']/a_pa:.1f}",
+            f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
+            f"Historical BTTS: home {round(hf['btts_home']/h_ph*100)}%, away {round(af['btts_away']/a_pa*100)}%",
+            f"Model probability: {round(prob*100)}%",
+        ], None
+
+    elif bet_type == "OVER25":
+        prob = 0.7 * p["p_over25"] + 0.3 * hist_over25
+        return round(prob * 100), [
+            f"Expected goals: {lam_h:.2f} + {lam_a:.2f} = {lam_h+lam_a:.2f}",
+            f"Historical over 2.5: home {round(hf['over25_home']/h_ph*100)}%, away {round(af['over25_away']/a_pa*100)}%",
+            f"Model probability: {round(prob*100)}%",
+        ], None
+
+    elif bet_type == "WIN":
+        if p["p_hw"] >= p["p_aw"]:
+            return round(p["p_hw"] * 100), [
+                f"Home win: {round(p['p_hw']*100)}% | Draw: {round(p['p_draw']*100)}% | Away win: {round(p['p_aw']*100)}%",
+                f"Home at home: {hf['wins_home']}W {hf['draws_home']}D {hf['losses_home']}L ({h_ph} games)",
+                f"Away away: {af['wins_away']}W {af['draws_away']}D {af['losses_away']}L ({a_pa} games)",
+            ], "home"
+        else:
+            return round(p["p_aw"] * 100), [
+                f"Away win: {round(p['p_aw']*100)}% | Draw: {round(p['p_draw']*100)}% | Home win: {round(p['p_hw']*100)}%",
+                f"Away away: {af['wins_away']}W {af['draws_away']}D {af['losses_away']}L ({a_pa} games)",
+                f"Home at home: {hf['wins_home']}W {hf['draws_home']}D {hf['losses_home']}L ({h_ph} games)",
+            ], "away"
+
+    elif bet_type == "BTTS_WIN":
+        if p["p_btts_hw"] >= p["p_btts_aw"]:
+            return round(p["p_btts_hw"] * 100), [
+                f"P(BTTS & home win): {round(p['p_btts_hw']*100)}%",
+                f"P(BTTS & away win): {round(p['p_btts_aw']*100)}%",
+                f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
+            ], "home"
+        else:
+            return round(p["p_btts_aw"] * 100), [
+                f"P(BTTS & away win): {round(p['p_btts_aw']*100)}%",
+                f"P(BTTS & home win): {round(p['p_btts_hw']*100)}%",
+                f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
+            ], "away"
+
+    elif bet_type == "BTTS_NODRAW":
+        prob = p["p_btts_nodraw"]
+        return round(prob * 100), [
+            f"P(BTTS & decisive result): {round(prob*100)}%",
+            f"Draw probability: {round(p['p_draw']*100)}%",
+            f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
+        ], None
+
+    elif bet_type == "BTTS_OVER25":
+        prob = p["p_btts_over25"]
+        return round(prob * 100), [
+            f"P(BTTS & over 2.5 goals): {round(prob*100)}%",
+            f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
+            f"Historical BTTS: {round(hist_btts*100)}%, over 2.5: {round(hist_over25*100)}%",
+        ], None
+
+    return 0, [], None
+
+
 # ── Coupon check ──────────────────────────────────────────────────────────────
 
 class CouponSelection(BaseModel):
@@ -274,180 +417,88 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
         away_id = fixture["away_team_id"]
 
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT * FROM team_form WHERE team_id IN (%s, %s)",
-                (home_id, away_id),
-            )
+            cur.execute("SELECT * FROM team_form WHERE team_id IN (%s, %s)", (home_id, away_id))
             forms = {r["team_id"]: r for r in cur.fetchall()}
 
-        hf = forms.get(home_id)  # home form
-        af = forms.get(away_id)  # away form
+        hf = forms.get(home_id)
+        af = forms.get(away_id)
         market = sel.market.upper()
         flags = []
 
-        if market == "1":
-            if hf and hf["wins"] <= 1:
-                flags.append(f"{fixture['home_team']} have only {hf['wins']} win(s) in their last {hf['played']} matches (form: {hf['form_string']})")
-            if hf and hf["losses"] >= 3:
-                flags.append(f"{fixture['home_team']} have lost {hf['losses']} of their last {hf['played']} matches")
-            if af and af["wins"] >= 3:
-                flags.append(f"{fixture['away_team']} are in good form — {af['wins']}W in last {af['played']}")
+        if hf and af:
+            lam_h, lam_a = _expected_goals(dict(hf), dict(af))
+            p = _match_probs(lam_h, lam_a)
+            h_ph = hf["played_home"] or 1
+            a_pa = af["played_away"] or 1
+            hist_btts = (hf["btts_home"] / h_ph + af["btts_away"] / a_pa) / 2
+            hist_over25 = (hf["over25_home"] / h_ph + af["over25_away"] / a_pa) / 2
+            p_btts = 0.7 * p["p_btts"] + 0.3 * hist_btts
+            p_over25 = 0.7 * p["p_over25"] + 0.3 * hist_over25
 
-        elif market == "2":
-            if af and af["wins"] <= 1:
-                flags.append(f"{fixture['away_team']} have only {af['wins']} win(s) in their last {af['played']} matches (form: {af['form_string']})")
-            if af and af["losses"] >= 3:
-                flags.append(f"{fixture['away_team']} have lost {af['losses']} of their last {af['played']} matches")
-            if hf and hf["wins"] >= 3:
-                flags.append(f"{fixture['home_team']} are in good form — {hf['wins']}W in last {hf['played']}")
+            if market == "1":
+                if p["p_hw"] < 0.40:
+                    flags.append(f"Home win probability only {round(p['p_hw']*100)}% — not a strong favourite")
+                if p["p_aw"] > 0.40:
+                    flags.append(f"Away win probability {round(p['p_aw']*100)}% — {fixture['away_team']} are a real threat")
+                if hf["recent_played"] >= 5 and hf["recent_wins"] / hf["recent_played"] < 0.25:
+                    flags.append(f"{fixture['home_team']} poor recent form: {hf['recent_wins']}W in last {hf['recent_played']}")
 
-        elif market == "X":
-            if hf and hf["draws"] <= 1:
-                flags.append(f"{fixture['home_team']} have only {hf['draws']} draw(s) in their last {hf['played']} matches")
-            if af and af["draws"] <= 1:
-                flags.append(f"{fixture['away_team']} have only {af['draws']} draw(s) in their last {af['played']} matches")
+            elif market == "2":
+                if p["p_aw"] < 0.33:
+                    flags.append(f"Away win probability only {round(p['p_aw']*100)}% — difficult ask")
+                if p["p_hw"] > 0.45:
+                    flags.append(f"Home win probability {round(p['p_hw']*100)}% — {fixture['home_team']} are strong favourites")
+                if af["recent_played"] >= 5 and af["recent_wins"] / af["recent_played"] < 0.20:
+                    flags.append(f"{fixture['away_team']} poor recent form: {af['recent_wins']}W in last {af['recent_played']}")
 
-        elif market == "BTTS_YES":
-            if hf and hf["goals_scored"] <= 2:
-                flags.append(f"{fixture['home_team']} have scored only {hf['goals_scored']} goal(s) in their last {hf['played']} matches")
-            if af and af["goals_scored"] <= 2:
-                flags.append(f"{fixture['away_team']} have scored only {af['goals_scored']} goal(s) in their last {af['played']} matches")
-            if hf and hf["clean_sheets"] >= 3:
-                flags.append(f"{fixture['home_team']} have kept {hf['clean_sheets']} clean sheets in last {hf['played']}")
-            if af and af["clean_sheets"] >= 3:
-                flags.append(f"{fixture['away_team']} have kept {af['clean_sheets']} clean sheets in last {af['played']}")
+            elif market == "X":
+                if p["p_draw"] < 0.22:
+                    flags.append(f"Draw probability only {round(p['p_draw']*100)}% — sides are mismatched")
+                if abs(p["p_hw"] - p["p_aw"]) > 0.30:
+                    stronger = fixture["home_team"] if p["p_hw"] > p["p_aw"] else fixture["away_team"]
+                    flags.append(f"{stronger} heavily favoured — draw unlikely")
 
-        elif market == "BTTS_NO":
-            if hf and hf["goals_scored"] >= 6:
-                flags.append(f"{fixture['home_team']} are high scorers — {hf['goals_scored']} goals in last {hf['played']}")
-            if af and af["goals_scored"] >= 6:
-                flags.append(f"{fixture['away_team']} are high scorers — {af['goals_scored']} goals in last {af['played']}")
+            elif market == "BTTS_YES":
+                if p_btts < 0.45:
+                    flags.append(f"BTTS probability only {round(p_btts*100)}% — one side may be shut out")
+                if hf["played_home"] >= 5 and hf["clean_sheets_home"] / h_ph >= 0.40:
+                    flags.append(f"{fixture['home_team']} keep clean sheets in {round(hf['clean_sheets_home']/h_ph*100)}% of home games")
+                if af["played_away"] >= 5 and af["clean_sheets_away"] / a_pa >= 0.40:
+                    flags.append(f"{fixture['away_team']} keep clean sheets in {round(af['clean_sheets_away']/a_pa*100)}% of away games")
 
-        elif market in ("OVER25", "UNDER25"):
-            if hf and af:
-                total = (hf["goals_scored"] + hf["goals_conceded"]
-                         + af["goals_scored"] + af["goals_conceded"])
-                played = hf["played"] + af["played"]
-                if played > 0:
-                    avg = total / played
-                    if market == "OVER25" and avg < 2.0:
-                        flags.append(f"Combined average of {avg:.1f} goals/match — low-scoring sides")
-                    elif market == "UNDER25" and avg > 3.0:
-                        flags.append(f"Combined average of {avg:.1f} goals/match — high-scoring sides")
+            elif market == "BTTS_NO":
+                if p_btts > 0.60:
+                    flags.append(f"BTTS probability {round(p_btts*100)}% — both teams likely to score")
+                if hf["played_home"] >= 5 and hf["goals_scored_home"] / h_ph >= 1.8:
+                    flags.append(f"{fixture['home_team']} score {hf['goals_scored_home']/h_ph:.1f} goals/home game")
+                if af["played_away"] >= 5 and af["goals_scored_away"] / a_pa >= 1.4:
+                    flags.append(f"{fixture['away_team']} score {af['goals_scored_away']/a_pa:.1f} goals/away game")
+
+            elif market == "OVER25":
+                if p_over25 < 0.45:
+                    flags.append(f"Over 2.5 probability only {round(p_over25*100)}% — low-scoring fixture expected")
+                if lam_h + lam_a < 2.2:
+                    flags.append(f"Expected goals only {lam_h+lam_a:.1f} — under 2.5 more likely")
+
+            elif market == "UNDER25":
+                if p_over25 > 0.60:
+                    flags.append(f"Over 2.5 probability {round(p_over25*100)}% — high-scoring fixture expected")
+                if lam_h + lam_a > 3.0:
+                    flags.append(f"Expected goals {lam_h+lam_a:.1f} — over 2.5 more likely")
 
         risk = "high" if len(flags) >= 2 else "medium" if len(flags) == 1 else "low"
         output.append({
-            "fixture_id":  sel.fixture_id,
-            "market":      sel.market,
-            "home_team":   fixture["home_team"],
-            "away_team":   fixture["away_team"],
-            "home_form":   hf["form_string"] if hf else None,
-            "away_form":   af["form_string"] if af else None,
-            "flags":       flags,
-            "risk":        risk,
+            "fixture_id": sel.fixture_id,
+            "market":     sel.market,
+            "home_team":  fixture["home_team"],
+            "away_team":  fixture["away_team"],
+            "home_form":  hf["form_string"] if hf else None,
+            "away_form":  af["form_string"] if af else None,
+            "flags":      flags,
+            "risk":       risk,
         })
 
     return output
-
-
-# ── Smart Picks ───────────────────────────────────────────────────────────────
-
-def _rate(num: int, den: int) -> float:
-    return num / den if den > 0 else 0.0
-
-
-def _score_fixture(bet_type: str, hf: dict, af: dict) -> Tuple[int, list, Optional[str]]:
-    """Return (score 0-100, reasoning lines, pick 'home'|'away'|None)."""
-    hp = hf["played"] or 1
-    ap = af["played"] or 1
-
-    h_win   = _rate(hf["wins"],         hp)
-    h_draw  = _rate(hf["draws"],        hp)
-    h_loss  = _rate(hf["losses"],       hp)
-    h_att   = _rate(hf["goals_scored"], hp)
-    h_def   = _rate(hf["goals_conceded"], hp)
-    h_cs    = _rate(hf["clean_sheets"], hp)
-
-    a_win   = _rate(af["wins"],         ap)
-    a_draw  = _rate(af["draws"],        ap)
-    a_loss  = _rate(af["losses"],       ap)
-    a_att   = _rate(af["goals_scored"], ap)
-    a_def   = _rate(af["goals_conceded"], ap)
-    a_cs    = _rate(af["clean_sheets"], ap)
-
-    hn = hf["home_team"] if "home_team" in hf else "Home"
-    an = af["away_team"] if "away_team" in af else "Away"
-
-    if bet_type == "BTTS":
-        raw = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
-        score = min(100, round(raw * 50))
-        reasons = [
-            f"Home scores {h_att:.1f} goals/game, concedes {h_def:.1f}",
-            f"Away scores {a_att:.1f} goals/game, concedes {a_def:.1f}",
-        ]
-        if h_cs >= 0.6: reasons.append(f"Caution: home kept {hf['clean_sheets']} clean sheets in last {hp}")
-        if a_cs >= 0.6: reasons.append(f"Caution: away kept {af['clean_sheets']} clean sheets in last {ap}")
-        return score, reasons, None
-
-    elif bet_type == "OVER25":
-        avg = ((h_att + h_def) + (a_att + a_def)) / 2
-        score = max(0, min(100, round((avg - 1.5) / 2.5 * 100)))
-        reasons = [
-            f"Home avg {h_att + h_def:.1f} goals/game (scored + conceded)",
-            f"Away avg {a_att + a_def:.1f} goals/game (scored + conceded)",
-            f"Combined average: {avg:.1f} goals/game",
-        ]
-        return score, reasons, None
-
-    elif bet_type == "WIN":
-        h_strength = (h_win + a_loss) / 2
-        a_strength = (a_win + h_loss) / 2
-        if h_strength >= a_strength:
-            score = min(100, round(h_strength * 100))
-            reasons = [f"Home: {hf['wins']}W {hf['draws']}D {hf['losses']}L in last {hp}",
-                       f"Away: {af['wins']}W {af['draws']}D {af['losses']}L in last {ap}"]
-            return score, reasons, "home"
-        else:
-            score = min(100, round(a_strength * 100))
-            reasons = [f"Away: {af['wins']}W {af['draws']}D {af['losses']}L in last {ap}",
-                       f"Home: {hf['wins']}W {hf['draws']}D {hf['losses']}L in last {hp}"]
-            return score, reasons, "away"
-
-    elif bet_type == "BTTS_WIN":
-        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
-        h_strength = (h_win + a_loss) / 2
-        a_strength = (a_win + h_loss) / 2
-        pick = "home" if h_strength >= a_strength else "away"
-        win_s = h_strength if pick == "home" else a_strength
-        score = min(100, round((btts + win_s) / 2 * 80))
-        reasons = [
-            f"BTTS: home scores {h_att:.1f}/game, away scores {a_att:.1f}/game",
-            f"Likely winner: {'home' if pick=='home' else 'away'} ({hf['wins']}W vs {af['wins']}W in last 5)",
-        ]
-        return score, reasons, pick
-
-    elif bet_type == "BTTS_NODRAW":
-        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
-        no_draw = 1 - (h_draw + a_draw) / 2
-        score = min(100, round(btts * no_draw * 80))
-        reasons = [
-            f"Home scores {h_att:.1f}/game, draw rate {round(h_draw*100)}%",
-            f"Away scores {a_att:.1f}/game, draw rate {round(a_draw*100)}%",
-        ]
-        return score, reasons, None
-
-    elif bet_type == "BTTS_OVER25":
-        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
-        avg = ((h_att + h_def) + (a_att + a_def)) / 2
-        over25 = max(0.0, min(1.0, (avg - 1.5) / 2.5))
-        score = min(100, round((btts + over25) / 2 * 80))
-        reasons = [
-            f"Home scores {h_att:.1f}/game, away scores {a_att:.1f}/game",
-            f"Combined avg {avg:.1f} goals/game",
-        ]
-        return score, reasons, None
-
-    return 0, [], None
 
 
 @app.get("/picks")

@@ -1,114 +1,224 @@
 """
-Pre-compute bet scores for all upcoming fixtures and store in fixture_scores table.
-Run nightly after build_form_cache.py so form data is fresh.
+Pre-compute bet scores for all upcoming fixtures using a Poisson probability model.
+Run nightly after build_form_cache.py.
+
+Model:
+  Expected home goals (λ_h) = average of:
+    - home team's goals scored per home game
+    - away team's goals conceded per away game
+  Expected away goals (λ_a) = average of:
+    - away team's goals scored per away game
+    - home team's goals conceded per home game
+
+  Recent form (last 10) adjusts λ up/down by up to 15%.
+
+  Poisson distribution gives P(home scores i, away scores j) for each scoreline.
+  Summing over scorelines gives P(home win), P(draw), P(away win), P(BTTS), P(over 2.5).
+
+  Scores (0-100) are probabilities × 100.
 """
-import os
 import json
+import math
+import os
 from datetime import datetime, timezone, timedelta
 
 import psycopg2
 
 DB = os.environ["DB_CONNECTION_STRING"]
-
 BET_TYPES = ["BTTS", "OVER25", "WIN", "BTTS_WIN", "BTTS_NODRAW", "BTTS_OVER25"]
-
-# Look-ahead: score fixtures up to this many days in advance
 DAYS_AHEAD = 14
+MAX_GOALS = 9  # sum scorelines up to 9-9
 
 
 def get_conn():
     return psycopg2.connect(DB)
 
 
-def _rate(num, den):
-    return num / den if den > 0 else 0.0
+def _poisson(lam, k):
+    if lam <= 0:
+        return 1.0 if k == 0 else 0.0
+    return (lam ** k) * math.exp(-lam) / math.factorial(k)
+
+
+def _expected_goals(hf, af):
+    """Return (lambda_home, lambda_away) using home/away split stats."""
+    h_ph = hf["played_home"] or 1
+    a_pa = af["played_away"] or 1
+
+    # Home team: how many they score at home, how many the away team concedes away
+    h_att = hf["goals_scored_home"] / h_ph
+    a_def = af["goals_conceded_away"] / a_pa
+
+    # Away team: how many they score away, how many the home team concedes at home
+    a_att = af["goals_scored_away"] / a_pa
+    h_def = hf["goals_conceded_home"] / h_ph
+
+    # Expected goals = average of scorer's rate and opponent's conceding rate
+    lam_h = (h_att + a_def) / 2
+    lam_a = (a_att + h_def) / 2
+
+    # Clamp to realistic range
+    lam_h = max(0.3, min(4.0, lam_h))
+    lam_a = max(0.3, min(4.0, lam_a))
+
+    # Recent form modifier: if team is winning more/less than their long-run rate, adjust
+    h_total = hf["played"] or 1
+    a_total = af["played"] or 1
+
+    if hf["recent_played"] >= 5:
+        hist_wr = hf["wins"] / h_total
+        rec_wr = hf["recent_wins"] / hf["recent_played"]
+        modifier = 1.0 + (rec_wr - hist_wr) * 0.5
+        lam_h *= max(0.85, min(1.15, modifier))
+
+    if af["recent_played"] >= 5:
+        hist_wr = af["wins"] / a_total
+        rec_wr = af["recent_wins"] / af["recent_played"]
+        modifier = 1.0 + (rec_wr - hist_wr) * 0.5
+        lam_a *= max(0.85, min(1.15, modifier))
+
+    return lam_h, lam_a
+
+
+def _match_probs(lam_h, lam_a):
+    """Compute outcome probabilities from expected goals using Poisson."""
+    p_hw = p_draw = p_aw = p_btts = p_over25 = 0.0
+    p_btts_hw = p_btts_aw = p_btts_nodraw = p_btts_over25 = 0.0
+
+    for i in range(MAX_GOALS + 1):
+        ph = _poisson(lam_h, i)
+        for j in range(MAX_GOALS + 1):
+            pa = _poisson(lam_a, j)
+            p = ph * pa
+
+            if i > j:
+                p_hw += p
+            elif i == j:
+                p_draw += p
+            else:
+                p_aw += p
+
+            if i > 0 and j > 0:
+                p_btts += p
+                if i > j:
+                    p_btts_hw += p
+                elif i < j:
+                    p_btts_aw += p
+                else:
+                    pass  # btts draw — not counted in btts_nodraw
+
+            if i + j > 2:
+                p_over25 += p
+
+            if i > 0 and j > 0 and i + j > 2:
+                p_btts_over25 += p
+
+    p_btts_nodraw = p_btts - (p_btts - p_btts_hw - p_btts_aw)
+    # Simpler: btts_nodraw = btts_hw + btts_aw (excludes btts draws)
+    p_btts_nodraw = p_btts_hw + p_btts_aw
+
+    return {
+        "p_hw": p_hw,
+        "p_draw": p_draw,
+        "p_aw": p_aw,
+        "p_btts": p_btts,
+        "p_over25": p_over25,
+        "p_btts_hw": p_btts_hw,
+        "p_btts_aw": p_btts_aw,
+        "p_btts_nodraw": p_btts_nodraw,
+        "p_btts_over25": p_btts_over25,
+    }
 
 
 def score_fixture(bet_type, hf, af):
     """Return (score 0-100, reasoning list, pick 'home'|'away'|None)."""
-    hp = hf["played"] or 1
-    ap = af["played"] or 1
+    h_ph = hf["played_home"] or 1
+    a_pa = af["played_away"] or 1
 
-    h_win  = _rate(hf["wins"],          hp)
-    h_draw = _rate(hf["draws"],         hp)
-    h_loss = _rate(hf["losses"],        hp)
-    h_att  = _rate(hf["goals_scored"],  hp)
-    h_def  = _rate(hf["goals_conceded"],hp)
-    h_cs   = _rate(hf["clean_sheets"],  hp)
+    lam_h, lam_a = _expected_goals(hf, af)
+    p = _match_probs(lam_h, lam_a)
 
-    a_win  = _rate(af["wins"],          ap)
-    a_draw = _rate(af["draws"],         ap)
-    a_loss = _rate(af["losses"],        ap)
-    a_att  = _rate(af["goals_scored"],  ap)
-    a_def  = _rate(af["goals_conceded"],ap)
-    a_cs   = _rate(af["clean_sheets"],  ap)
+    # Historical rates for blending
+    hist_btts = (hf["btts_home"] / h_ph + af["btts_away"] / a_pa) / 2
+    hist_over25 = (hf["over25_home"] / h_ph + af["over25_away"] / a_pa) / 2
 
     if bet_type == "BTTS":
-        raw = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
-        score = min(100, round(raw * 50))
+        # Blend Poisson (70%) with historical rate (30%)
+        prob = 0.7 * p["p_btts"] + 0.3 * hist_btts
+        score = round(prob * 100)
         reasons = [
-            f"Home scores {h_att:.1f} goals/game, concedes {h_def:.1f}",
-            f"Away scores {a_att:.1f} goals/game, concedes {a_def:.1f}",
+            f"Home scores {hf['goals_scored_home']/h_ph:.1f}/game at home, concedes {hf['goals_conceded_home']/h_ph:.1f}",
+            f"Away scores {af['goals_scored_away']/a_pa:.1f}/game away, concedes {af['goals_conceded_away']/a_pa:.1f}",
+            f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
+            f"Historical BTTS rate: home {round(hf['btts_home']/h_ph*100)}%, away {round(af['btts_away']/a_pa*100)}%",
+            f"Model probability: {round(prob*100)}%",
         ]
-        if h_cs >= 0.6: reasons.append(f"Caution: home kept {hf['clean_sheets']} clean sheets in last {hp}")
-        if a_cs >= 0.6: reasons.append(f"Caution: away kept {af['clean_sheets']} clean sheets in last {ap}")
         return score, reasons, None
 
     elif bet_type == "OVER25":
-        avg = ((h_att + h_def) + (a_att + a_def)) / 2
-        score = max(0, min(100, round((avg - 1.5) / 2.5 * 100)))
+        prob = 0.7 * p["p_over25"] + 0.3 * hist_over25
+        score = round(prob * 100)
         reasons = [
-            f"Home avg {h_att + h_def:.1f} goals/game (scored + conceded)",
-            f"Away avg {a_att + a_def:.1f} goals/game (scored + conceded)",
-            f"Combined average: {avg:.1f} goals/game",
+            f"Expected goals: {lam_h:.2f} home + {lam_a:.2f} away = {lam_h+lam_a:.2f} total",
+            f"Historical over 2.5 rate: home {round(hf['over25_home']/h_ph*100)}%, away {round(af['over25_away']/a_pa*100)}%",
+            f"Model probability: {round(prob*100)}%",
         ]
         return score, reasons, None
 
     elif bet_type == "WIN":
-        h_strength = (h_win + a_loss) / 2
-        a_strength = (a_win + h_loss) / 2
-        if h_strength >= a_strength:
-            score = min(100, round(h_strength * 100))
-            reasons = [f"Home: {hf['wins']}W {hf['draws']}D {hf['losses']}L in last {hp}",
-                       f"Away: {af['wins']}W {af['draws']}D {af['losses']}L in last {ap}"]
+        if p["p_hw"] >= p["p_aw"]:
+            score = round(p["p_hw"] * 100)
+            reasons = [
+                f"Home win probability: {round(p['p_hw']*100)}%",
+                f"Draw probability: {round(p['p_draw']*100)}%",
+                f"Away win probability: {round(p['p_aw']*100)}%",
+                f"Home record at home: {hf['wins_home']}W {hf['draws_home']}D {hf['losses_home']}L ({h_ph} games)",
+                f"Away record away: {af['wins_away']}W {af['draws_away']}D {af['losses_away']}L ({a_pa} games)",
+            ]
             return score, reasons, "home"
         else:
-            score = min(100, round(a_strength * 100))
-            reasons = [f"Away: {af['wins']}W {af['draws']}D {af['losses']}L in last {ap}",
-                       f"Home: {hf['wins']}W {hf['draws']}D {hf['losses']}L in last {hp}"]
+            score = round(p["p_aw"] * 100)
+            reasons = [
+                f"Away win probability: {round(p['p_aw']*100)}%",
+                f"Draw probability: {round(p['p_draw']*100)}%",
+                f"Home win probability: {round(p['p_hw']*100)}%",
+                f"Away record away: {af['wins_away']}W {af['draws_away']}D {af['losses_away']}L ({a_pa} games)",
+                f"Home record at home: {hf['wins_home']}W {hf['draws_home']}D {hf['losses_home']}L ({h_ph} games)",
+            ]
             return score, reasons, "away"
 
     elif bet_type == "BTTS_WIN":
-        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
-        h_strength = (h_win + a_loss) / 2
-        a_strength = (a_win + h_loss) / 2
-        pick = "home" if h_strength >= a_strength else "away"
-        win_s = h_strength if pick == "home" else a_strength
-        score = min(100, round((btts + win_s) / 2 * 80))
+        if p["p_btts_hw"] >= p["p_btts_aw"]:
+            prob = p["p_btts_hw"]
+            pick = "home"
+        else:
+            prob = p["p_btts_aw"]
+            pick = "away"
+        score = round(prob * 100)
         reasons = [
-            f"BTTS: home scores {h_att:.1f}/game, away scores {a_att:.1f}/game",
-            f"Likely winner: {pick} ({hf['wins']}W vs {af['wins']}W in last 5)",
+            f"P(BTTS & home win): {round(p['p_btts_hw']*100)}%",
+            f"P(BTTS & away win): {round(p['p_btts_aw']*100)}%",
+            f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
         ]
         return score, reasons, pick
 
     elif bet_type == "BTTS_NODRAW":
-        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
-        no_draw = 1 - (h_draw + a_draw) / 2
-        score = min(100, round(btts * no_draw * 80))
+        prob = p["p_btts_nodraw"]
+        score = round(prob * 100)
         reasons = [
-            f"Home scores {h_att:.1f}/game, draw rate {round(h_draw*100)}%",
-            f"Away scores {a_att:.1f}/game, draw rate {round(a_draw*100)}%",
+            f"P(BTTS & decisive result): {round(prob*100)}%",
+            f"Draw probability: {round(p['p_draw']*100)}%",
+            f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
         ]
         return score, reasons, None
 
     elif bet_type == "BTTS_OVER25":
-        btts = (a_att * (1 - h_cs) + h_att * (1 - a_cs)) / 2
-        avg = ((h_att + h_def) + (a_att + a_def)) / 2
-        over25 = max(0.0, min(1.0, (avg - 1.5) / 2.5))
-        score = min(100, round((btts + over25) / 2 * 80))
+        prob = p["p_btts_over25"]
+        score = round(prob * 100)
         reasons = [
-            f"Home scores {h_att:.1f}/game, away scores {a_att:.1f}/game",
-            f"Combined avg {avg:.1f} goals/game",
+            f"P(BTTS & over 2.5 goals): {round(prob*100)}%",
+            f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
+            f"Historical BTTS rate: {round(hist_btts*100)}%, over 2.5 rate: {round(hist_over25*100)}%",
         ]
         return score, reasons, None
 
@@ -123,7 +233,6 @@ def main():
     print(f"Fixture scoring started at {now.isoformat()}")
     print(f"  Scoring fixtures from {date_from} to {date_to}")
 
-    # Load upcoming fixtures (no result yet)
     with conn.cursor() as cur:
         cur.execute("""
             SELECT f.id, f.home_team_id, f.away_team_id,
@@ -140,6 +249,7 @@ def main():
             ORDER BY f.kickoff_time
         """, (date_from, date_to))
         fixtures = cur.fetchall()
+        col_names = [desc[0] for desc in cur.description]
 
     print(f"  Found {len(fixtures)} upcoming fixtures")
 
@@ -148,20 +258,22 @@ def main():
         print("No fixtures to score.")
         return
 
-    # Load form for all relevant teams
-    team_ids = list({row[1] for row in fixtures} | {row[2] for row in fixtures})
+    team_ids = list({row[col_names.index("home_team_id")] for row in fixtures} |
+                    {row[col_names.index("away_team_id")] for row in fixtures})
+
     with conn.cursor() as cur:
         cur.execute("SELECT * FROM team_form WHERE team_id = ANY(%s)", (team_ids,))
         rows = cur.fetchall()
-        col_names = [desc[0] for desc in cur.description]
-        forms = {row[col_names.index("team_id")]: dict(zip(col_names, row)) for row in rows}
+        form_cols = [desc[0] for desc in cur.description]
+        forms = {row[form_cols.index("team_id")]: dict(zip(form_cols, row)) for row in rows}
 
-    scored = 0
-    skipped = 0
+    scored = skipped = 0
 
     with conn.cursor() as cur:
         for fixture in fixtures:
-            fid, home_id, away_id, home_team, away_team, league_name, kickoff = fixture
+            frow = dict(zip(col_names, fixture))
+            home_id = frow["home_team_id"]
+            away_id = frow["away_team_id"]
             hf = forms.get(home_id)
             af = forms.get(away_id)
 
@@ -180,7 +292,7 @@ def main():
                         pick       = EXCLUDED.pick,
                         reasoning  = EXCLUDED.reasoning,
                         updated_at = NOW()
-                """, (fid, bet_type, score, pick, json.dumps(reasoning)))
+                """, (frow["id"], bet_type, score, pick, json.dumps(reasoning)))
             scored += 1
 
     conn.commit()
