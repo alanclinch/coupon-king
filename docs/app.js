@@ -406,13 +406,17 @@ function leagueSortIndex(name) {
 
 // ── Market labels ─────────────────────────────────────────────────────────────
 const MARKETS = {
-  '1':        'Home Win',
-  'X':        'Draw',
-  '2':        'Away Win',
-  'BTTS_YES': 'BTTS Yes',
-  'BTTS_NO':  'BTTS No',
-  'OVER25':   'Over 2.5 Goals',
-  'UNDER25':  'Under 2.5 Goals',
+  '1':           'Win (H)',
+  'X':           'Draw',
+  '2':           'Win (A)',
+  'BTTS_YES':    'BTTS',
+  'BTTS_NO':     'BTTS No',
+  'OVER25':      'Over 2.5',
+  'UNDER25':     'Under 2.5',
+  'BTTS_WIN_H':  'Score and Win (H)',
+  'BTTS_WIN_A':  'Score and Win (A)',
+  'BTTS_NODRAW': 'Both Score No Draw',
+  'BTTS_OVER25': 'Both Score Over 2.5',
 };
 
 const BET_TYPES = {
@@ -517,12 +521,9 @@ function renderFixturesView() {
         let homeProb = '', awayProb = '';
         if (scoreInfo && isDirectional && scoreInfo.pick) {
           const pct = scoreInfo.score;
-          const other = 100 - pct;
           if (scoreInfo.pick === 'home') {
             homeProb = `<span class="fixture-team-pct" style="color:${sColor}">${pct}%</span>`;
-            awayProb = `<span class="fixture-team-pct muted">${other}%</span>`;
           } else {
-            homeProb = `<span class="fixture-team-pct muted">${other}%</span>`;
             awayProb = `<span class="fixture-team-pct" style="color:${sColor}">${pct}%</span>`;
           }
         }
