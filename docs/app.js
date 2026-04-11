@@ -725,8 +725,9 @@ function renderCouponView() {
             </div>
           </div>` : '';
 
+        const borderColor = sc || 'var(--border)';
         html += `
-          <div class="analysis-card risk-${r.risk}">
+          <div class="analysis-card" style="border-left-color:${borderColor}">
             <div class="analysis-header">
               <div>
                 <div class="analysis-match">${esc(r.home_team)} vs ${esc(r.away_team)}</div>

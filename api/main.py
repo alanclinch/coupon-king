@@ -443,7 +443,7 @@ def _yn_form(conn, team_id: int, is_home: bool, market: str, n: int = 5) -> str:
         if m in ("1", "2"):
             chars.append("Y" if won else "N")
         elif m == "BTTS_YES":
-            chars.append("Y" if scored else "N")   # did this team score?
+            chars.append("Y" if (s > 0 and c > 0) else "N")  # both teams scored
         elif m == "OVER25":
             chars.append("Y" if over25 else "N")
         elif m in ("BTTS_WIN_H", "BTTS_WIN_A"):
