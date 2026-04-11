@@ -414,6 +414,32 @@ class CouponSelection(BaseModel):
     market: str  # "1" | "X" | "2" | "BTTS_YES" | "BTTS_NO" | "OVER25" | "UNDER25"
 
 
+_MEDIUM_INTROS = [
+    "One thing to consider before backing this one.",
+    "Worth reviewing before you place this.",
+    "The model spotted a concern — have a look before adding.",
+    "One flag raised. Might still come in, but worth noting.",
+    "A minor concern — judge for yourself before placing.",
+]
+
+_HIGH_INTROS = [
+    "The model has real concerns about this selection.",
+    "A few red flags here — proceed carefully.",
+    "This one carries significant risk according to the model.",
+    "Multiple concerns flagged — worth reconsidering.",
+    "The model isn't confident here. Review the flags below.",
+]
+
+
+def _risk_intro(fixture_id: int, risk: str) -> str:
+    idx = fixture_id % 5
+    if risk == "medium":
+        return _MEDIUM_INTROS[idx]
+    elif risk == "high":
+        return _HIGH_INTROS[idx]
+    return ""
+
+
 def _positive_insight(fixture_id: int, market: str, home_team: str, away_team: str,
                       home_yn: str, away_yn: str) -> str:
     """Generate a positive insight from Y/N form strings when there are no flags."""
@@ -657,6 +683,10 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
             flags = [_positive_insight(sel.fixture_id, sel.market,
                                        fixture["home_team"], fixture["away_team"],
                                        home_yn, away_yn)]
+        else:
+            intro = _risk_intro(sel.fixture_id, risk)
+            if intro:
+                flags = [intro] + flags
 
         _market_to_bt = {
             "1": "WIN", "2": "WIN", "X": "WIN",

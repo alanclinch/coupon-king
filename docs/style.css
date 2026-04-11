@@ -513,6 +513,15 @@ main {
   color: var(--accent);
 }
 
+.flag-intro {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.flag-intro.risk-medium { color: var(--warning); }
+.flag-intro.risk-high   { color: var(--danger); }
+
 .form-guide {
   font-family: monospace;
   font-size: 12px;
