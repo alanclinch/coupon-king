@@ -14,8 +14,8 @@ HEADERS = {"x-apisports-key": API_KEY}
 
 LEAGUES = {
     180: "Scottish Championship",
-    181: "Scottish League One",
-    182: "Scottish League Two",
+    183: "Scottish League One",
+    184: "Scottish League Two",
     42:  "League Two",
     43:  "National League",
 }
