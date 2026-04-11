@@ -607,10 +607,13 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
             p_btts = 0.7 * p["p_btts"] + 0.3 * hist_btts
             p_over25 = 0.7 * p["p_over25"] + 0.3 * hist_over25
 
+            # Flag thresholds calibrated to P25 of actual fixture_scores data:
+            # WIN=39%, BTTS=44%, OVER25=44%, BTTS_WIN=16%, BTTS_NODRAW=30%, BTTS_OVER25=32%
+
             if market == "1":
-                if p["p_hw"] < 0.40:
+                if p["p_hw"] < 0.39:
                     flags.append(f"Home win probability only {round(p['p_hw']*100)}% — not a strong favourite")
-                if p["p_aw"] > 0.40:
+                if p["p_aw"] > 0.45:
                     flags.append(f"Away win probability {round(p['p_aw']*100)}% — {fixture['away_team']} are a real threat")
                 if hf["recent_played"] >= 5 and hf["recent_wins"] / hf["recent_played"] < 0.25:
                     flags.append(f"{fixture['home_team']} poor recent form: {hf['recent_wins']}W in last {hf['recent_played']}")
@@ -618,7 +621,7 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
             elif market == "2":
                 if p["p_aw"] < 0.33:
                     flags.append(f"Away win probability only {round(p['p_aw']*100)}% — difficult ask")
-                if p["p_hw"] > 0.45:
+                if p["p_hw"] > 0.50:
                     flags.append(f"Home win probability {round(p['p_hw']*100)}% — {fixture['home_team']} are strong favourites")
                 if af["recent_played"] >= 5 and af["recent_wins"] / af["recent_played"] < 0.20:
                     flags.append(f"{fixture['away_team']} poor recent form: {af['recent_wins']}W in last {af['recent_played']}")
@@ -631,49 +634,35 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
                     flags.append(f"{stronger} heavily favoured — draw unlikely")
 
             elif market == "BTTS_YES":
-                if p_btts < 0.45:
+                if p_btts < 0.44:
                     flags.append(f"BTTS probability only {round(p_btts*100)}% — one side may be shut out")
                 if hf["played_home"] >= 5 and hf["clean_sheets_home"] / h_ph >= 0.40:
                     flags.append(f"{fixture['home_team']} keep clean sheets in {round(hf['clean_sheets_home']/h_ph*100)}% of home games")
                 if af["played_away"] >= 5 and af["clean_sheets_away"] / a_pa >= 0.40:
                     flags.append(f"{fixture['away_team']} keep clean sheets in {round(af['clean_sheets_away']/a_pa*100)}% of away games")
 
-            elif market == "BTTS_NO":
-                if p_btts > 0.60:
-                    flags.append(f"BTTS probability {round(p_btts*100)}% — both teams likely to score")
-                if hf["played_home"] >= 5 and hf["goals_scored_home"] / h_ph >= 1.8:
-                    flags.append(f"{fixture['home_team']} score {hf['goals_scored_home']/h_ph:.1f} goals/home game")
-                if af["played_away"] >= 5 and af["goals_scored_away"] / a_pa >= 1.4:
-                    flags.append(f"{fixture['away_team']} score {af['goals_scored_away']/a_pa:.1f} goals/away game")
-
             elif market == "OVER25":
-                if p_over25 < 0.45:
+                if p_over25 < 0.44:
                     flags.append(f"Over 2.5 probability only {round(p_over25*100)}% — low-scoring fixture expected")
                 if lam_h + lam_a < 2.2:
                     flags.append(f"Expected goals only {lam_h+lam_a:.1f} — under 2.5 more likely")
 
-            elif market == "UNDER25":
-                if p_over25 > 0.60:
-                    flags.append(f"Over 2.5 probability {round(p_over25*100)}% — high-scoring fixture expected")
-                if lam_h + lam_a > 3.0:
-                    flags.append(f"Expected goals {lam_h+lam_a:.1f} — over 2.5 more likely")
-
             elif market in ("BTTS_WIN_H", "BTTS_WIN_A"):
                 p_bw = p["p_btts"] * (p["p_hw"] if market == "BTTS_WIN_H" else p["p_aw"])
-                if p_bw < 0.25:
+                if p_bw < 0.16:  # P25 for BTTS_WIN is 16%
                     side = fixture["home_team"] if market == "BTTS_WIN_H" else fixture["away_team"]
-                    flags.append(f"Score and Win probability only {round(p_bw*100)}% — difficult combined bet")
-                if p_btts < 0.45:
+                    flags.append(f"Score and Win probability only {round(p_bw*100)}% — below typical range for this bet")
+                if p_btts < 0.44:
                     flags.append(f"BTTS probability only {round(p_btts*100)}% — one side may be shut out")
 
             elif market == "BTTS_NODRAW":
                 p_bnd = p["p_btts"] * (1 - p["p_draw"])
-                if p_bnd < 0.35:
+                if p_bnd < 0.30:  # P25 for BTTS_NODRAW is 30%
                     flags.append(f"Both Score No Draw probability only {round(p_bnd*100)}% — draw or clean sheet likely")
 
             elif market == "BTTS_OVER25":
                 p_bo = p["p_btts"] * p["p_over25"]
-                if p_bo < 0.30:
+                if p_bo < 0.35:  # P25 for BTTS_OVER25 is 35%
                     flags.append(f"Both Score Over 2.5 probability only {round(p_bo*100)}% — low-scoring game likely")
 
         risk = "high" if len(flags) >= 2 else "medium" if len(flags) == 1 else "low"
