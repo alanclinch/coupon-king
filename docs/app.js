@@ -418,14 +418,14 @@ const BET_TYPES = {
   'BTTS_OVER25': 'Both Score Over 2.5',
 };
 
-// Realistic green/amber thresholds per bet type based on actual model output ranges
+// Thresholds derived from actual fixture_scores data (P75=green, P25=amber)
 const BET_THRESHOLDS = {
-  'WIN':         { green: 60, amber: 45 },
-  'BTTS':        { green: 58, amber: 44 },
-  'OVER25':      { green: 48, amber: 38 },
-  'BTTS_WIN':    { green: 40, amber: 28 },
-  'BTTS_NODRAW': { green: 52, amber: 40 },
-  'BTTS_OVER25': { green: 44, amber: 32 },
+  'WIN':         { green: 50, amber: 40 },
+  'BTTS':        { green: 55, amber: 48 },
+  'OVER25':      { green: 52, amber: 44 },
+  'BTTS_WIN':    { green: 22, amber: 16 },
+  'BTTS_NODRAW': { green: 36, amber: 30 },
+  'BTTS_OVER25': { green: 44, amber: 35 },
 };
 
 function scoreColor(bt, score) {
