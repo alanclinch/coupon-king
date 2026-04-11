@@ -581,6 +581,22 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
         risk = "high" if len(flags) >= 2 else "medium" if len(flags) == 1 else "low"
         home_yn = _yn_form(conn, home_id, True,  sel.market) if hf else None
         away_yn = _yn_form(conn, away_id, False, sel.market) if af else None
+
+        _market_to_bt = {
+            "1": "WIN", "2": "WIN", "X": "WIN",
+            "BTTS_YES": "BTTS", "BTTS_NO": "BTTS",
+            "OVER25": "OVER25", "UNDER25": "OVER25",
+            "BTTS_WIN_H": "BTTS_WIN", "BTTS_WIN_A": "BTTS_WIN",
+            "BTTS_NODRAW": "BTTS_NODRAW",
+            "BTTS_OVER25": "BTTS_OVER25",
+        }
+        bt = _market_to_bt.get(market, "WIN")
+        with conn.cursor() as cur:
+            cur.execute("SELECT score FROM fixture_scores WHERE fixture_id = %s AND bet_type = %s",
+                        (sel.fixture_id, bt))
+            fs_row = cur.fetchone()
+        fixture_score = fs_row["score"] if fs_row else None
+
         output.append({
             "fixture_id":   sel.fixture_id,
             "market":       sel.market,
@@ -588,6 +604,7 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
             "away_team":    fixture["away_team"],
             "home_form_yn": home_yn,
             "away_form_yn": away_yn,
+            "score":        fixture_score,
             "flags":        flags,
             "risk":         risk,
         })

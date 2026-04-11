@@ -182,7 +182,7 @@ function inCoupon(id) {
   return state.coupon.some(p => p.fixtureId === id);
 }
 
-function addToCoupon(fixture) {
+function addToCoupon(fixture, market = '1') {
   if (fixture.home_goals !== null && fixture.home_goals !== undefined) return;
   if (inCoupon(fixture.id)) {
     state.coupon = state.coupon.filter(p => p.fixtureId !== fixture.id);
@@ -195,7 +195,7 @@ function addToCoupon(fixture) {
       awayTeamId:  fixture.away_team_id,
       kickoffTime: fixture.kickoff_time,
       leagueName:  fixture.league_name,
-      market:      '1',
+      market,
     });
   }
   saveCoupon();
@@ -236,8 +236,8 @@ function smartFill() {
     'OVER25':      'OVER25',
     'WIN':         null,  // handled per-pick using pick.pick
     'BTTS_WIN':    null,
-    'BTTS_NODRAW': 'BTTS_YES',
-    'BTTS_OVER25': 'BTTS_YES',
+    'BTTS_NODRAW': 'BTTS_NODRAW',
+    'BTTS_OVER25': 'BTTS_OVER25',
   };
 
   const sorted = Object.entries(state.picksScoreMap)
@@ -300,9 +300,9 @@ function addPickToCoupon(pickIndex) {
     'BTTS':        'BTTS_YES',
     'OVER25':      'OVER25',
     'WIN':         pick.pick === 'home' ? '1' : pick.pick === 'away' ? '2' : '1',
-    'BTTS_WIN':    pick.pick === 'home' ? '1' : pick.pick === 'away' ? '2' : '1',
-    'BTTS_NODRAW': 'BTTS_YES',
-    'BTTS_OVER25': 'BTTS_YES',
+    'BTTS_WIN':    pick.pick === 'home' ? 'BTTS_WIN_H' : 'BTTS_WIN_A',
+    'BTTS_NODRAW': 'BTTS_NODRAW',
+    'BTTS_OVER25': 'BTTS_OVER25',
   };
   const market = marketMap[pick.bet_type] || '1';
 
@@ -406,18 +406,28 @@ function leagueSortIndex(name) {
 
 // ── Market labels ─────────────────────────────────────────────────────────────
 const MARKETS = {
-  '1':           'Win (H)',
-  'X':           'Draw',
-  '2':           'Win (A)',
+  '1':           'Result (H)',
+  '2':           'Result (A)',
+  'X':           'Result (Draw)',
   'BTTS_YES':    'BTTS',
-  'BTTS_NO':     'BTTS No',
   'OVER25':      'Over 2.5',
-  'UNDER25':     'Under 2.5',
   'BTTS_WIN_H':  'Score and Win (H)',
   'BTTS_WIN_A':  'Score and Win (A)',
   'BTTS_NODRAW': 'Both Score No Draw',
   'BTTS_OVER25': 'Both Score Over 2.5',
 };
+
+function marketToBetType(market) {
+  const map = {
+    '1': 'WIN', '2': 'WIN', 'X': 'WIN',
+    'BTTS_YES': 'BTTS',
+    'OVER25': 'OVER25',
+    'BTTS_WIN_H': 'BTTS_WIN', 'BTTS_WIN_A': 'BTTS_WIN',
+    'BTTS_NODRAW': 'BTTS_NODRAW',
+    'BTTS_OVER25': 'BTTS_OVER25',
+  };
+  return map[market] || 'WIN';
+}
 
 const BET_TYPES = {
   'WIN':         'Result',
@@ -616,7 +626,7 @@ function renderPicksView() {
         <div class="pick-body">
           <div class="pick-header-row" onclick="openDetailFromPick(${i})" style="cursor:pointer">
             <div class="pick-teams">${esc(pick.home_team)} <span class="vs-sep">vs</span> ${esc(pick.away_team)}</div>
-            <div class="pick-score-num" style="color:${sc}">${pick.score}</div>
+            <span class="fixture-score-pct" style="color:${sc}">${pick.score}%</span>
           </div>
           <div class="pick-sub">${esc(pick.league_name)} &middot; ${esc(fmtDate(pick.kickoff_time))} ${esc(fmtTime(pick.kickoff_time))} &middot; ${esc(betLabel)}</div>
           ${pickBadge}
@@ -695,8 +705,10 @@ function renderCouponView() {
       html += `<div class="analysis-summary">${esc(summary)}</div><div class="analysis-list">`;
 
       for (const r of state.analysis) {
-        const riskLabel = r.risk.charAt(0).toUpperCase() + r.risk.slice(1) + ' risk';
-        const market    = MARKETS[r.market] || r.market;
+        const market   = MARKETS[r.market] || r.market;
+        const bt       = marketToBetType(r.market);
+        const sc       = r.score != null ? scoreColor(bt, r.score) : null;
+        const scorePct = sc ? `<span class="fixture-score-pct" style="color:${sc}">${r.score}%</span>` : '';
         const flagsHtml = (r.flags && r.flags.length)
           ? r.flags.map(f => `<div class="flag-item">${esc(f)}</div>`).join('')
           : '<div class="no-flags">No concerns with this selection.</div>';
@@ -719,9 +731,9 @@ function renderCouponView() {
               <div>
                 <div class="analysis-match">${esc(r.home_team)} vs ${esc(r.away_team)}</div>
                 <div class="analysis-sub">${esc(market)}</div>
-          ${formRow}
+                ${formRow}
               </div>
-              <span class="risk-badge ${r.risk}">${riskLabel}</span>
+              ${scorePct}
             </div>
             <div class="analysis-flags">${flagsHtml}</div>
           </div>`;
@@ -1017,7 +1029,17 @@ function openDetailFromCoupon(fixtureId) {
 
 function handleAddBtn(id) {
   const fixture = state.fixtures.find(f => f.id === id);
-  if (fixture) addToCoupon(fixture);
+  if (!fixture) return;
+  const bt = state.picksBetType;
+  const scoreInfo = state.picksScoreMap[id];
+  let market = '1';
+  if (bt === 'WIN')         market = scoreInfo?.pick === 'away' ? '2' : '1';
+  else if (bt === 'BTTS')   market = 'BTTS_YES';
+  else if (bt === 'OVER25') market = 'OVER25';
+  else if (bt === 'BTTS_WIN') market = scoreInfo?.pick === 'away' ? 'BTTS_WIN_A' : 'BTTS_WIN_H';
+  else if (bt === 'BTTS_NODRAW') market = 'BTTS_NODRAW';
+  else if (bt === 'BTTS_OVER25') market = 'BTTS_OVER25';
+  addToCoupon(fixture, market);
 }
 
 async function openDetail(fixture) {
