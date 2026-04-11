@@ -418,6 +418,21 @@ const BET_TYPES = {
   'BTTS_OVER25': 'Both Score Over 2.5',
 };
 
+// Realistic green/amber thresholds per bet type based on actual model output ranges
+const BET_THRESHOLDS = {
+  'WIN':         { green: 60, amber: 45 },
+  'BTTS':        { green: 58, amber: 44 },
+  'OVER25':      { green: 48, amber: 38 },
+  'BTTS_WIN':    { green: 40, amber: 28 },
+  'BTTS_NODRAW': { green: 52, amber: 40 },
+  'BTTS_OVER25': { green: 44, amber: 32 },
+};
+
+function scoreColor(bt, score) {
+  const t = BET_THRESHOLDS[bt] || { green: 65, amber: 45 };
+  return score >= t.green ? 'var(--accent)' : score >= t.amber ? 'var(--warning)' : 'var(--danger)';
+}
+
 function marketOptions(selected) {
   return Object.entries(MARKETS)
     .map(([v, l]) => `<option value="${v}"${v === selected ? ' selected' : ''}>${l}</option>`)
@@ -484,34 +499,34 @@ function renderFixturesView() {
         const classes   = ['fixture-card', sel ? 'selected' : '', completed ? 'completed' : ''].filter(Boolean).join(' ');
 
         const scoreInfo = !completed && state.picksScoreMap[f.id];
-        const scoreColor = scoreInfo
-          ? (scoreInfo.score >= 70 ? 'var(--accent)' : scoreInfo.score >= 45 ? 'var(--warning)' : 'var(--danger)')
-          : null;
         const isDirectional = scoreInfo && (scoreInfo.bet_type === 'WIN' || scoreInfo.bet_type === 'BTTS_WIN');
-        let scoreBadge = '';
-        if (scoreInfo && isDirectional) {
-          const dir = scoreInfo.pick === 'home' ? 'H' : scoreInfo.pick === 'away' ? 'A' : '?';
-          scoreBadge = `<span class="fixture-score-badge directional" style="color:${scoreColor};border-color:${scoreColor}">${dir} ${scoreInfo.score}</span>`;
-        } else if (scoreInfo) {
-          scoreBadge = `<span class="fixture-score-badge" style="color:${scoreColor};border-color:${scoreColor}">${scoreInfo.score}</span>`;
-        }
+        const sColor = scoreInfo ? scoreColor(scoreInfo.bet_type, scoreInfo.score) : null;
+
+        // Non-directional: colored dot in place of number
+        const scoreDot = (scoreInfo && !isDirectional)
+          ? `<span class="fixture-score-dot" style="background:${sColor}"></span>`
+          : '';
+
+        // Directional: color team names, no badge, no bar
+        const homeStyle = (scoreInfo && isDirectional && scoreInfo.pick === 'home') ? ` style="color:${sColor}"` : '';
+        const awayStyle = (scoreInfo && isDirectional && scoreInfo.pick === 'away') ? ` style="color:${sColor}"` : '';
 
         html += `
           <div class="${classes}">
-            ${scoreInfo ? `<div class="fixture-score-bar" style="background:${scoreColor};width:${scoreInfo.score}%"></div>` : ''}
+            ${(scoreInfo && !isDirectional) ? `<div class="fixture-score-bar" style="background:${sColor};width:${scoreInfo.score}%"></div>` : ''}
             <div class="fixture-row">
               <div class="fixture-main"${!completed ? ` onclick="handleCardTap(${f.id})"` : ''} style="${!completed ? 'cursor:pointer' : ''}">
                 <div class="fixture-meta">
                   <span class="fixture-time">${esc(fmtDate(f.kickoff_time))} &middot; ${esc(fmtTime(f.kickoff_time))}</span>
                   <div style="display:flex;align-items:center;gap:6px">
-                    ${scoreBadge}
+                    ${scoreDot}
                     <span class="fixture-tick" aria-label="Selected">&#10003;</span>
                   </div>
                 </div>
                 <div class="fixture-teams">
-                  <span class="team-name home">${esc(f.home_team)}</span>
+                  <span class="team-name home"${homeStyle}>${esc(f.home_team)}</span>
                   ${middle}
-                  <span class="team-name away">${esc(f.away_team)}</span>
+                  <span class="team-name away"${awayStyle}>${esc(f.away_team)}</span>
                 </div>
               </div>
               ${!completed ? `<button class="add-btn${sel ? ' added' : ''}" onclick="handleAddBtn(${f.id})" aria-label="${sel ? 'Remove from coupon' : 'Add to coupon'}">${sel ? '&#10003;' : '+'}</button>` : ''}
@@ -734,10 +749,14 @@ function renderDetailView() {
   // ── Bet scores ──
   if (state.detailScores && Object.keys(state.detailScores).length) {
     html += '<div class="detail-section-title">Bet Scores</div><div class="detail-scores-grid">';
-    for (const [bt, info] of Object.entries(state.detailScores)) {
+    const BT_ORDER = ['WIN', 'BTTS', 'OVER25', 'BTTS_WIN', 'BTTS_NODRAW', 'BTTS_OVER25'];
+    const sortedScores = BT_ORDER
+      .filter(bt => state.detailScores[bt])
+      .map(bt => [bt, state.detailScores[bt]]);
+    for (const [bt, info] of sortedScores) {
       const label = BET_TYPES[bt] || bt;
       const sc = info.score;
-      const color = sc >= 70 ? 'var(--accent)' : sc >= 45 ? 'var(--warning)' : 'var(--danger)';
+      const color = scoreColor(bt, sc);
       const pickLabel = info.pick ? ` &middot; <strong>${info.pick === 'home' ? esc(f.home_team) : esc(f.away_team)}</strong>` : '';
       html += `
         <div class="detail-score-card">

@@ -724,6 +724,13 @@ main {
   line-height: 1.4;
 }
 
+.fixture-score-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 /* ── Fixture card + button ─────────────────────────────────────────────────── */
 .fixture-card {
   display: flex;
