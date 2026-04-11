@@ -508,6 +508,11 @@ main {
   color: var(--accent);
 }
 
+.flag-positive {
+  font-size: 13px;
+  color: var(--accent);
+}
+
 .form-guide {
   font-family: monospace;
   font-size: 12px;

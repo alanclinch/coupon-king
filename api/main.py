@@ -414,6 +414,78 @@ class CouponSelection(BaseModel):
     market: str  # "1" | "X" | "2" | "BTTS_YES" | "BTTS_NO" | "OVER25" | "UNDER25"
 
 
+def _positive_insight(fixture_id: int, market: str, home_team: str, away_team: str,
+                      home_yn: str, away_yn: str) -> str:
+    """Generate a positive insight from Y/N form strings when there are no flags."""
+    m = market.upper()
+    hy = (home_yn or "").count("Y")
+    ay = (away_yn or "").count("Y")
+    nh = len(home_yn or "")
+    na = len(away_yn or "")
+    total = hy + ay
+    ntotal = nh + na
+    idx = fixture_id % 3  # vary phrasing per fixture
+
+    if m in ("1",):
+        phrases = [
+            f"{home_team} have won {hy} of their last {nh} home games",
+            f"{home_team} are in good home form — {hy} wins from {nh} games",
+            f"{home_team} picked up {hy}/{nh} wins at home recently",
+        ]
+    elif m in ("2",):
+        phrases = [
+            f"{away_team} have won {ay} of their last {na} away games",
+            f"{away_team} are travelling well — {ay} wins from {na} away games",
+            f"{away_team} picked up {ay}/{na} wins on the road recently",
+        ]
+    elif m == "X":
+        phrases = [
+            f"These sides have drawn {total} of their last {ntotal} combined games",
+            f"Recent form suggests parity — {total}/{ntotal} draws between them",
+            f"Both sides have shown they can share the points — {total}/{ntotal} recently",
+        ]
+    elif m == "BTTS_YES":
+        phrases = [
+            f"Between them they've been involved in {total}/{ntotal} BTTS games recently",
+            f"{total} of their last {ntotal} combined games have seen both teams score",
+            f"Both sides have shown a tendency to score — {total}/{ntotal} BTTS in recent games",
+        ]
+    elif m == "OVER25":
+        phrases = [
+            f"{total} of their last {ntotal} combined games produced over 2.5 goals",
+            f"These sides have been involved in high-scoring games — {total}/{ntotal} over 2.5 recently",
+            f"Over 2.5 goals in {total} of the last {ntotal} combined games",
+        ]
+    elif m == "BTTS_WIN_H":
+        phrases = [
+            f"{home_team} scored and won in {hy} of their last {nh} home games",
+            f"{home_team} have delivered Score and Win results in {hy}/{nh} recent home games",
+            f"{home_team} found the net and took all three points in {hy}/{nh} home games recently",
+        ]
+    elif m == "BTTS_WIN_A":
+        phrases = [
+            f"{away_team} scored and won in {ay} of their last {na} away games",
+            f"{away_team} have delivered Score and Win results in {ay}/{na} recent away games",
+            f"{away_team} found the net and took all three points in {ay}/{na} away games recently",
+        ]
+    elif m == "BTTS_NODRAW":
+        phrases = [
+            f"{total} of their last {ntotal} combined games had both teams score with a decisive result",
+            f"Both sides tend to produce open, decisive games — {total}/{ntotal} recently",
+            f"Both Score No Draw in {total} of their last {ntotal} combined games",
+        ]
+    elif m == "BTTS_OVER25":
+        phrases = [
+            f"{total} of their last {ntotal} combined games had both teams score and over 2.5 goals",
+            f"High-scoring, open games — {total}/{ntotal} Both Score Over 2.5 recently",
+            f"Both sides have featured in {total}/{ntotal} Both Score Over 2.5 games recently",
+        ]
+    else:
+        phrases = [f"Model sees this as a solid pick — {total}/{ntotal} positive results in recent games"]
+
+    return phrases[idx % len(phrases)]
+
+
 def _yn_form(conn, team_id: int, is_home: bool, market: str, n: int = 5) -> str:
     """Return Y/N string for a team's last n games in their role, per market."""
     m = market.upper()
@@ -581,6 +653,10 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
         risk = "high" if len(flags) >= 2 else "medium" if len(flags) == 1 else "low"
         home_yn = _yn_form(conn, home_id, True,  sel.market) if hf else None
         away_yn = _yn_form(conn, away_id, False, sel.market) if af else None
+        if not flags:
+            flags = [_positive_insight(sel.fixture_id, sel.market,
+                                       fixture["home_team"], fixture["away_team"],
+                                       home_yn, away_yn)]
 
         _market_to_bt = {
             "1": "WIN", "2": "WIN", "X": "WIN",

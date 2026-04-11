@@ -710,8 +710,10 @@ function renderCouponView() {
         const sc       = r.score != null ? scoreColor(bt, r.score) : null;
         const scorePct = sc ? `<span class="fixture-score-pct" style="color:${sc}">${r.score}%</span>` : '';
         const flagsHtml = (r.flags && r.flags.length)
-          ? r.flags.map(f => `<div class="flag-item">${esc(f)}</div>`).join('')
-          : '<div class="no-flags">No concerns with this selection.</div>';
+          ? r.flags.map(f => r.risk === 'low'
+              ? `<div class="flag-positive">${esc(f)}</div>`
+              : `<div class="flag-item">${esc(f)}</div>`).join('')
+          : '';
 
         const formRow = (r.home_form_yn || r.away_form_yn) ? `
           <div class="analysis-form">
