@@ -377,21 +377,21 @@ def _score_fixture(bet_type: str, hf: dict, af: dict,
     elif bet_type == "BTTS_WIN":
         if p["p_btts_hw"] >= p["p_btts_aw"]:
             return round(p["p_btts_hw"] * 100), [
-                f"P(BTTS & home win): {round(p['p_btts_hw']*100)}%",
-                f"P(BTTS & away win): {round(p['p_btts_aw']*100)}%",
+                f"Score and Win (H): {round(p['p_btts_hw']*100)}%",
+                f"Score and Win (A): {round(p['p_btts_aw']*100)}%",
                 f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
             ], "home"
         else:
             return round(p["p_btts_aw"] * 100), [
-                f"P(BTTS & away win): {round(p['p_btts_aw']*100)}%",
-                f"P(BTTS & home win): {round(p['p_btts_hw']*100)}%",
+                f"Score and Win (A): {round(p['p_btts_aw']*100)}%",
+                f"Score and Win (H): {round(p['p_btts_hw']*100)}%",
                 f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
             ], "away"
 
     elif bet_type == "BTTS_NODRAW":
         prob = p["p_btts_nodraw"]
         return round(prob * 100), [
-            f"P(BTTS & decisive result): {round(prob*100)}%",
+            f"Both Score No Draw: {round(prob*100)}%",
             f"Draw probability: {round(p['p_draw']*100)}%",
             f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
         ], None
@@ -399,7 +399,7 @@ def _score_fixture(bet_type: str, hf: dict, af: dict,
     elif bet_type == "BTTS_OVER25":
         prob = p["p_btts_over25"]
         return round(prob * 100), [
-            f"P(BTTS & over 2.5 goals): {round(prob*100)}%",
+            f"Both Score Over 2.5: {round(prob*100)}%",
             f"Expected goals: {lam_h:.2f} – {lam_a:.2f}",
             f"Historical BTTS: {round(hist_btts*100)}%, over 2.5: {round(hist_over25*100)}%",
         ], None
