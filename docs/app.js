@@ -449,8 +449,15 @@ function marketOptions(selected) {
     .join('');
 }
 
-// ── Form guide renderer ───────────────────────────────────────────────────────
+// ── Form guide renderers ──────────────────────────────────────────────────────
 function formGuide(str) {
+  if (!str) return '';
+  return str.split('').map(c =>
+    `<span class="form-char ${c}">${c}</span>`
+  ).join('');
+}
+
+function ynGuide(str) {
   if (!str) return '';
   return str.split('').map(c =>
     `<span class="form-char ${c}">${c}</span>`
@@ -512,9 +519,9 @@ function renderFixturesView() {
         const isDirectional = scoreInfo && (scoreInfo.bet_type === 'WIN' || scoreInfo.bet_type === 'BTTS_WIN');
         const sColor = scoreInfo ? scoreColor(scoreInfo.bet_type, scoreInfo.score) : null;
 
-        // Non-directional: colored dot in place of number
+        // Non-directional: colored percentage
         const scoreDot = (scoreInfo && !isDirectional)
-          ? `<span class="fixture-score-dot" style="background:${sColor}"></span>`
+          ? `<span class="fixture-score-pct" style="color:${sColor}">${scoreInfo.score}%</span>`
           : '';
 
         // Directional: percentage under each team name
@@ -694,10 +701,16 @@ function renderCouponView() {
           ? r.flags.map(f => `<div class="flag-item">${esc(f)}</div>`).join('')
           : '<div class="no-flags">No concerns with this selection.</div>';
 
-        const formRow = (r.home_form || r.away_form) ? `
-          <div class="form-guide">
-            ${esc(r.home_team)}: ${formGuide(r.home_form || '')} &nbsp;
-            ${esc(r.away_team)}: ${formGuide(r.away_form || '')}
+        const formRow = (r.home_form_yn || r.away_form_yn) ? `
+          <div class="analysis-form">
+            <div class="analysis-form-row">
+              <span class="analysis-form-team">${esc(r.home_team)}</span>
+              <span class="analysis-form-chars">${ynGuide(r.home_form_yn || '')}</span>
+            </div>
+            <div class="analysis-form-row">
+              <span class="analysis-form-team">${esc(r.away_team)}</span>
+              <span class="analysis-form-chars">${ynGuide(r.away_form_yn || '')}</span>
+            </div>
           </div>` : '';
 
         html += `
@@ -705,7 +718,8 @@ function renderCouponView() {
             <div class="analysis-header">
               <div>
                 <div class="analysis-match">${esc(r.home_team)} vs ${esc(r.away_team)}</div>
-                <div class="analysis-sub">${esc(market)}${formRow}</div>
+                <div class="analysis-sub">${esc(market)}</div>
+          ${formRow}
               </div>
               <span class="risk-badge ${r.risk}">${riskLabel}</span>
             </div>

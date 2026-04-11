@@ -520,6 +520,35 @@ main {
 .form-char.W { color: var(--accent); }
 .form-char.D { color: var(--text-muted); }
 .form-char.L { color: var(--danger); }
+.form-char.Y { color: var(--accent); }
+.form-char.N { color: var(--danger); }
+
+.fixture-score-pct {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.analysis-form {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.analysis-form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.analysis-form-team {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 90px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ── Settings view ─────────────────────────────────────────────────────────── */
 .settings-section { padding: 12px 12px 0; }

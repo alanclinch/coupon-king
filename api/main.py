@@ -414,6 +414,50 @@ class CouponSelection(BaseModel):
     market: str  # "1" | "X" | "2" | "BTTS_YES" | "BTTS_NO" | "OVER25" | "UNDER25"
 
 
+def _yn_form(conn, team_id: int, is_home: bool, market: str, n: int = 5) -> str:
+    """Return Y/N string for a team's last n games in their role, per market."""
+    m = market.upper()
+    col_scored   = "r.home_goals" if is_home else "r.away_goals"
+    col_conceded = "r.away_goals" if is_home else "r.home_goals"
+    team_col     = "f.home_team_id" if is_home else "f.away_team_id"
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT {col_scored} AS scored, {col_conceded} AS conceded
+            FROM fixtures f
+            JOIN results r ON r.fixture_id = f.id
+            WHERE {team_col} = %s AND r.home_goals IS NOT NULL
+            ORDER BY f.kickoff_time DESC
+            LIMIT %s
+        """, (team_id, n))
+        games = cur.fetchall()
+
+    chars = []
+    for g in reversed(games):  # oldest first
+        s, c = g["scored"], g["conceded"]
+        btts   = s > 0 and c > 0
+        over25 = s + c > 2
+        won    = s > c
+        scored = s > 0
+
+        if m in ("1", "2"):
+            chars.append("Y" if won else "N")
+        elif m == "BTTS_YES":
+            chars.append("Y" if scored else "N")   # did this team score?
+        elif m == "OVER25":
+            chars.append("Y" if over25 else "N")
+        elif m in ("BTTS_WIN_H", "BTTS_WIN_A"):
+            chars.append("Y" if (scored and won) else "N")
+        elif m == "BTTS_NODRAW":
+            chars.append("Y" if (btts and not (s == c)) else "N")
+        elif m == "BTTS_OVER25":
+            chars.append("Y" if (btts and over25) else "N")
+        else:
+            chars.append("Y" if won else "N")
+
+    return "".join(chars)
+
+
 @app.post("/coupon/check")
 def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
     output = []
@@ -516,16 +560,36 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
                 if lam_h + lam_a > 3.0:
                     flags.append(f"Expected goals {lam_h+lam_a:.1f} — over 2.5 more likely")
 
+            elif market in ("BTTS_WIN_H", "BTTS_WIN_A"):
+                p_bw = p["p_btts"] * (p["p_hw"] if market == "BTTS_WIN_H" else p["p_aw"])
+                if p_bw < 0.25:
+                    side = fixture["home_team"] if market == "BTTS_WIN_H" else fixture["away_team"]
+                    flags.append(f"Score and Win probability only {round(p_bw*100)}% — difficult combined bet")
+                if p_btts < 0.45:
+                    flags.append(f"BTTS probability only {round(p_btts*100)}% — one side may be shut out")
+
+            elif market == "BTTS_NODRAW":
+                p_bnd = p["p_btts"] * (1 - p["p_draw"])
+                if p_bnd < 0.35:
+                    flags.append(f"Both Score No Draw probability only {round(p_bnd*100)}% — draw or clean sheet likely")
+
+            elif market == "BTTS_OVER25":
+                p_bo = p["p_btts"] * p["p_over25"]
+                if p_bo < 0.30:
+                    flags.append(f"Both Score Over 2.5 probability only {round(p_bo*100)}% — low-scoring game likely")
+
         risk = "high" if len(flags) >= 2 else "medium" if len(flags) == 1 else "low"
+        home_yn = _yn_form(conn, home_id, True,  sel.market) if hf else None
+        away_yn = _yn_form(conn, away_id, False, sel.market) if af else None
         output.append({
-            "fixture_id": sel.fixture_id,
-            "market":     sel.market,
-            "home_team":  fixture["home_team"],
-            "away_team":  fixture["away_team"],
-            "home_form":  hf["form_string"] if hf else None,
-            "away_form":  af["form_string"] if af else None,
-            "flags":      flags,
-            "risk":       risk,
+            "fixture_id":   sel.fixture_id,
+            "market":       sel.market,
+            "home_team":    fixture["home_team"],
+            "away_team":    fixture["away_team"],
+            "home_form_yn": home_yn,
+            "away_form_yn": away_yn,
+            "flags":        flags,
+            "risk":         risk,
         })
 
     return output
