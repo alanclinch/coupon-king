@@ -14,7 +14,7 @@ const state = {
   picks:           [],
   picksLoading:    false,
   picksLoaded:     false,
-  picksBetType:    'BTTS',
+  picksBetType:    'WIN',
   picksDateFilter: 'week',
   picksScoreMap:   {},        // fixtureId -> score, populated silently on fixtures load
   // Detail view
@@ -338,6 +338,13 @@ function setPicksBetType(bt) {
   loadPicks();
 }
 
+function setFixturesBetType(bt) {
+  state.picksBetType = bt;
+  state.picksScoreMap = {};
+  render();
+  loadPicksScores();
+}
+
 function setPicksDateFilter(f) {
   state.picksDateFilter = f;
   loadPicks();
@@ -403,12 +410,12 @@ const MARKETS = {
 };
 
 const BET_TYPES = {
+  'WIN':         'Result',
   'BTTS':        'BTTS',
   'OVER25':      'Over 2.5',
-  'WIN':         'Pick Winner',
-  'BTTS_WIN':    'BTTS & Win',
-  'BTTS_NODRAW': 'BTTS No Draw',
-  'BTTS_OVER25': 'BTTS + Over 2.5',
+  'BTTS_WIN':    'Score and Win',
+  'BTTS_NODRAW': 'Both Score No Draw',
+  'BTTS_OVER25': 'Both Score Over 2.5',
 };
 
 function marketOptions(selected) {
@@ -442,16 +449,16 @@ function renderFixturesView() {
 
   const sortedDays = Object.keys(days).sort();
 
-  // Smart Fill button — only show if we have scores
+  const betTypeOptions = Object.entries(BET_TYPES)
+    .map(([k, l]) => `<option value="${k}"${k === state.picksBetType ? ' selected' : ''}>${esc(l)}</option>`)
+    .join('');
+
   const scoredCount = Object.keys(state.picksScoreMap).length;
-  let html = '';
-  if (scoredCount > 0) {
-    html += `
-      <div class="smart-fill-bar">
-        <span class="smart-fill-label">Scored ${scoredCount} fixtures &middot; ${BET_TYPES[state.picksBetType] || state.picksBetType}</span>
-        <button class="smart-fill-btn" onclick="smartFill()">&#9733; Smart Fill Top 5</button>
-      </div>`;
-  }
+  let html = `
+    <div class="fixtures-toolbar">
+      <select class="bet-type-select" onchange="setFixturesBetType(this.value)">${betTypeOptions}</select>
+      ${scoredCount > 0 ? `<button class="smart-fill-btn" onclick="smartFill()">&#9733; Smart Fill Top 5</button>` : ''}
+    </div>`;
 
   html += '<div class="fixtures-list">';
   for (const day of sortedDays) {
@@ -480,9 +487,14 @@ function renderFixturesView() {
         const scoreColor = scoreInfo
           ? (scoreInfo.score >= 70 ? 'var(--accent)' : scoreInfo.score >= 45 ? 'var(--warning)' : 'var(--danger)')
           : null;
-        const scoreBadge = scoreInfo
-          ? `<span class="fixture-score-badge" style="color:${scoreColor};border-color:${scoreColor}">${scoreInfo.score}</span>`
-          : '';
+        const isDirectional = scoreInfo && (scoreInfo.bet_type === 'WIN' || scoreInfo.bet_type === 'BTTS_WIN');
+        let scoreBadge = '';
+        if (scoreInfo && isDirectional) {
+          const dir = scoreInfo.pick === 'home' ? 'H' : scoreInfo.pick === 'away' ? 'A' : '?';
+          scoreBadge = `<span class="fixture-score-badge directional" style="color:${scoreColor};border-color:${scoreColor}">${dir} ${scoreInfo.score}</span>`;
+        } else if (scoreInfo) {
+          scoreBadge = `<span class="fixture-score-badge" style="color:${scoreColor};border-color:${scoreColor}">${scoreInfo.score}</span>`;
+        }
 
         html += `
           <div class="${classes}">
