@@ -224,21 +224,34 @@ def get_fixture_scores(fixture_id: int, conn=Depends(get_db)):
     if not fixture:
         raise HTTPException(status_code=404, detail="Fixture not found")
 
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT * FROM team_form WHERE team_id IN (%s, %s)",
-            (fixture["home_team_id"], fixture["away_team_id"]),
-        )
-        forms = {r["team_id"]: r for r in cur.fetchall()}
+    home_id = fixture["home_team_id"]
+    away_id = fixture["away_team_id"]
 
-    hf = forms.get(fixture["home_team_id"])
-    af = forms.get(fixture["away_team_id"])
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM team_form WHERE team_id IN (%s, %s)", (home_id, away_id))
+        forms = {r["team_id"]: r for r in cur.fetchall()}
+    with conn.cursor() as cur:
+        cur.execute("SELECT team_id, attack, defence FROM team_ratings WHERE team_id IN (%s, %s)", (home_id, away_id))
+        ratings = {r["team_id"]: r for r in cur.fetchall()}
+    with conn.cursor() as cur:
+        cur.execute("SELECT key, value FROM model_params")
+        mparams = {r["key"]: r["value"] for r in cur.fetchall()}
+
+    hf = forms.get(home_id)
+    af = forms.get(away_id)
     if not hf or not af:
         return {}
 
+    gamma = mparams.get("gamma", 1.3)
+    rho = mparams.get("rho", -0.1)
+
     out = {}
     for bt in ["BTTS", "OVER25", "WIN", "BTTS_WIN", "BTTS_NODRAW", "BTTS_OVER25"]:
-        score, reasoning, pick = _score_fixture(bt, dict(hf), dict(af))
+        score, reasoning, pick = _score_fixture(
+            bt, dict(hf), dict(af),
+            ratings.get(home_id), ratings.get(away_id),
+            gamma, rho,
+        )
         out[bt] = {"score": score, "pick": pick, "reasoning": reasoning}
     return out
 
@@ -254,35 +267,39 @@ def _poisson(lam: float, k: int) -> float:
     return (lam ** k) * math.exp(-lam) / math.factorial(k)
 
 
-def _expected_goals(hf: dict, af: dict) -> Tuple[float, float]:
-    h_ph = hf["played_home"] or 1
-    a_pa = af["played_away"] or 1
+def _expected_goals(hf: dict, af: dict,
+                    home_rating: Optional[dict] = None,
+                    away_rating: Optional[dict] = None,
+                    gamma: float = 1.3) -> Tuple[float, float]:
+    if home_rating and away_rating:
+        # Dixon-Coles: α_home × β_away × γ
+        lam_h = home_rating["attack"] * away_rating["defence"] * gamma
+        lam_a = away_rating["attack"] * home_rating["defence"]
+    else:
+        # Fallback: raw goal averages from home/away split
+        h_ph = hf["played_home"] or 1
+        a_pa = af["played_away"] or 1
+        h_att = hf["goals_scored_home"] / h_ph
+        a_def = af["goals_conceded_away"] / a_pa
+        a_att = af["goals_scored_away"] / a_pa
+        h_def = hf["goals_conceded_home"] / h_ph
+        lam_h = (h_att + a_def) / 2
+        lam_a = (a_att + h_def) / 2
 
-    h_att = hf["goals_scored_home"] / h_ph
-    a_def = af["goals_conceded_away"] / a_pa
-    a_att = af["goals_scored_away"] / a_pa
-    h_def = hf["goals_conceded_home"] / h_ph
-
-    lam_h = (h_att + a_def) / 2
-    lam_a = (a_att + h_def) / 2
-
-    lam_h = max(0.3, min(4.0, lam_h))
-    lam_a = max(0.3, min(4.0, lam_a))
-
-    # Recent form modifier (±15% max)
-    h_total = hf["played"] or 1
-    a_total = af["played"] or 1
-    if hf["recent_played"] >= 5:
-        modifier = 1.0 + (hf["recent_wins"] / hf["recent_played"] - hf["wins"] / h_total) * 0.5
-        lam_h *= max(0.85, min(1.15, modifier))
-    if af["recent_played"] >= 5:
-        modifier = 1.0 + (af["recent_wins"] / af["recent_played"] - af["wins"] / a_total) * 0.5
-        lam_a *= max(0.85, min(1.15, modifier))
-
+    lam_h = max(0.3, min(4.5, lam_h))
+    lam_a = max(0.3, min(4.5, lam_a))
     return lam_h, lam_a
 
 
-def _match_probs(lam_h: float, lam_a: float) -> dict:
+def _dc_correction(lam_h: float, lam_a: float, i: int, j: int, rho: float) -> float:
+    if i == 0 and j == 0:   return 1 - lam_h * lam_a * rho
+    elif i == 1 and j == 0: return 1 + lam_a * rho
+    elif i == 0 and j == 1: return 1 + lam_h * rho
+    elif i == 1 and j == 1: return 1 - rho
+    return 1.0
+
+
+def _match_probs(lam_h: float, lam_a: float, rho: float = -0.1) -> dict:
     p_hw = p_draw = p_aw = p_btts = p_over25 = 0.0
     p_btts_hw = p_btts_aw = p_btts_over25 = 0.0
 
@@ -290,13 +307,14 @@ def _match_probs(lam_h: float, lam_a: float) -> dict:
         ph = _poisson(lam_h, i)
         for j in range(_MAX_GOALS + 1):
             pa = _poisson(lam_a, j)
-            p = ph * pa
-            if i > j:   p_hw += p
+            tau = _dc_correction(lam_h, lam_a, i, j, rho)
+            p = max(0.0, ph * pa * tau)
+            if i > j:    p_hw += p
             elif i == j: p_draw += p
             else:        p_aw += p
             if i > 0 and j > 0:
                 p_btts += p
-                if i > j: p_btts_hw += p
+                if i > j:  p_btts_hw += p
                 elif i < j: p_btts_aw += p
             if i + j > 2: p_over25 += p
             if i > 0 and j > 0 and i + j > 2: p_btts_over25 += p
@@ -310,15 +328,19 @@ def _match_probs(lam_h: float, lam_a: float) -> dict:
     }
 
 
-def _score_fixture(bet_type: str, hf: dict, af: dict) -> Tuple[int, list, Optional[str]]:
+def _score_fixture(bet_type: str, hf: dict, af: dict,
+                   home_rating: Optional[dict] = None,
+                   away_rating: Optional[dict] = None,
+                   gamma: float = 1.3,
+                   rho: float = -0.1) -> Tuple[int, list, Optional[str]]:
     """Return (score 0-100, reasoning lines, pick 'home'|'away'|None)."""
     h_ph = hf["played_home"] or 1
     a_pa = af["played_away"] or 1
-    hist_btts = (hf["btts_home"] / h_ph + af["btts_away"] / a_pa) / 2
-    hist_over25 = (hf["over25_home"] / h_ph + af["over25_away"] / a_pa) / 2
+    hist_btts = (hf["btts_home"] / h_ph + af["btts_away"] / (af["played_away"] or 1)) / 2
+    hist_over25 = (hf["over25_home"] / h_ph + af["over25_away"] / (af["played_away"] or 1)) / 2
 
-    lam_h, lam_a = _expected_goals(hf, af)
-    p = _match_probs(lam_h, lam_a)
+    lam_h, lam_a = _expected_goals(hf, af, home_rating, away_rating, gamma)
+    p = _match_probs(lam_h, lam_a, rho)
 
     if bet_type == "BTTS":
         prob = 0.7 * p["p_btts"] + 0.3 * hist_btts
@@ -419,6 +441,12 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM team_form WHERE team_id IN (%s, %s)", (home_id, away_id))
             forms = {r["team_id"]: r for r in cur.fetchall()}
+        with conn.cursor() as cur:
+            cur.execute("SELECT team_id, attack, defence FROM team_ratings WHERE team_id IN (%s, %s)", (home_id, away_id))
+            ratings = {r["team_id"]: r for r in cur.fetchall()}
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM model_params")
+            mparams = {r["key"]: r["value"] for r in cur.fetchall()}
 
         hf = forms.get(home_id)
         af = forms.get(away_id)
@@ -426,8 +454,10 @@ def check_coupon(selections: List[CouponSelection], conn=Depends(get_db)):
         flags = []
 
         if hf and af:
-            lam_h, lam_a = _expected_goals(dict(hf), dict(af))
-            p = _match_probs(lam_h, lam_a)
+            gamma = mparams.get("gamma", 1.3)
+            rho = mparams.get("rho", -0.1)
+            lam_h, lam_a = _expected_goals(dict(hf), dict(af), ratings.get(home_id), ratings.get(away_id), gamma)
+            p = _match_probs(lam_h, lam_a, rho)
             h_ph = hf["played_home"] or 1
             a_pa = af["played_away"] or 1
             hist_btts = (hf["btts_home"] / h_ph + af["btts_away"] / a_pa) / 2
@@ -569,6 +599,15 @@ def get_picks(
     with conn.cursor() as cur:
         cur.execute("SELECT * FROM team_form WHERE team_id = ANY(%s)", (team_ids,))
         forms = {r["team_id"]: r for r in cur.fetchall()}
+    with conn.cursor() as cur:
+        cur.execute("SELECT team_id, attack, defence FROM team_ratings WHERE team_id = ANY(%s)", (team_ids,))
+        ratings = {r["team_id"]: r for r in cur.fetchall()}
+    with conn.cursor() as cur:
+        cur.execute("SELECT key, value FROM model_params")
+        mparams = {r["key"]: r["value"] for r in cur.fetchall()}
+
+    gamma = mparams.get("gamma", 1.3)
+    rho = mparams.get("rho", -0.1)
 
     results = []
     for f in fixtures:
@@ -577,10 +616,14 @@ def get_picks(
         if not hf or not af:
             continue
 
-        hf = dict(hf); hf["home_team"] = f["home_team"]
-        af = dict(af); af["away_team"] = f["away_team"]
+        hf = dict(hf)
+        af = dict(af)
 
-        score, reasoning, pick = _score_fixture(bt, hf, af)
+        score, reasoning, pick = _score_fixture(
+            bt, hf, af,
+            ratings.get(f["home_team_id"]), ratings.get(f["away_team_id"]),
+            gamma, rho,
+        )
 
         results.append({
             **dict(f),

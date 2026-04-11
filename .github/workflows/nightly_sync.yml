@@ -53,7 +53,36 @@ jobs:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
         run: python scripts/build_form_cache.py
 
+      - name: Build Dixon-Coles team ratings
+        env:
+          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+        run: python scripts/build_ratings.py
+
       - name: Build fixture scores
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
         run: python scripts/build_fixture_scores.py
+
+      - name: Record weekend picks (Fridays only)
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+        run: |
+          DAY=$(date +%u)
+          if [ "$DAY" = "5" ]; then
+            python scripts/record_weekend_picks.py
+          else
+            echo "Not Friday — skipping weekend pick recording"
+          fi
+
+      - name: Grade weekend picks (Mondays only)
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+        run: |
+          DAY=$(date +%u)
+          if [ "$DAY" = "1" ]; then
+            python scripts/grade_weekend_picks.py
+          else
+            echo "Not Monday — skipping grading"
+          fi
