@@ -13,11 +13,8 @@ BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
 LEAGUES = {
-    180: "Scottish Championship",
     183: "Scottish League One",
     184: "Scottish League Two",
-    42:  "League Two",
-    43:  "National League",
 }
 
 

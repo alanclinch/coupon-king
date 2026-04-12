@@ -66,7 +66,7 @@ def upsert_fixture(cur, api_fixture_id, home_id, away_id, league_id, kickoff, se
     cur.execute("""
         INSERT INTO fixtures (home_team_id, away_team_id, league_id, season, kickoff_time, status, matchday)
         VALUES (%s, %s, %s, %s, %s, 'scheduled', %s) RETURNING id
-    """, (home_id, away_id, league_id, kickoff, season, matchday))
+    """, (home_id, away_id, league_id, season, kickoff, matchday))
     local_id = cur.fetchone()[0]
     cur.execute("""
         INSERT INTO api_id_map (table_name, local_id, api_source, api_id)
