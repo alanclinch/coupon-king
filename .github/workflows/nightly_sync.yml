@@ -27,20 +27,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Sportmonks sync
-        env:
-          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
-          SPORTMONKS_API_KEY: ${{ secrets.SPORTMONKS_API_KEY }}
-          FULL_SYNC: ${{ inputs.full_sync == true && '1' || '0' }}
-        run: python scripts/sync_sportmonks.py
-
-      - name: Run football-data sync
-        env:
-          DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
-          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
-          FULL_SYNC: ${{ inputs.full_sync == true && '1' || '0' }}
-        run: python scripts/sync_football_data.py
-
       - name: Run API-Sports sync
         env:
           DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}

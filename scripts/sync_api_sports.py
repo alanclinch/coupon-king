@@ -10,19 +10,21 @@ BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
 # API-Sports league IDs mapped to our league names
-# Note: 179=Scottish Premiership is handled by Sportmonks, not included here
-# English: 39=PL and 40=Championship handled by football-data.org, not included here
 LEAGUES = {
-    180: "Scottish Championship",
-    183: "Scottish League One",
-    184: "Scottish League Two",
-    528: "Scottish Cup",
-    529: "Scottish League Cup",
+    39:  "Premier League",
+    40:  "Championship",
     41:  "League One",
     42:  "League Two",
     43:  "National League",
     45:  "FA Cup",
     48:  "EFL Cup",
+    179: "Scottish Premiership",
+    180: "Scottish Championship",
+    183: "Scottish League One",
+    184: "Scottish League Two",
+    528: "Scottish Cup",
+    529: "Scottish League Cup",
+    2:   "Champions League",
     3:   "Europa League",
     848: "Conference League",
 }
