@@ -532,11 +532,14 @@ function renderFixturesView() {
         // Parse both team probabilities from reasoning for directional bets
         let homePct = null, awayPct = null;
         if (scoreInfo && isDirectional && scoreInfo.reasoning && scoreInfo.reasoning.length) {
-          const line = scoreInfo.reasoning[0];
-          const hm = line.match(/(?:Home win|Score and Win \(H\)):\s*(\d+)%/);
-          const am = line.match(/(?:Away win|Score and Win \(A\)):\s*(\d+)%/);
-          if (hm) homePct = parseInt(hm[1]);
-          if (am) awayPct = parseInt(am[1]);
+          // WIN: "Home win: 55% | Draw: 20% | Away win: 25%"
+          // BTTS_WIN: lines like "Score and Win (H): 22%" and "Score and Win (A): 18%"
+          for (const line of scoreInfo.reasoning) {
+            const hm = line.match(/Home win:\s*(\d+)%/) || line.match(/Score and Win \(H\):\s*(\d+)%/);
+            const am = line.match(/Away win:\s*(\d+)%/) || line.match(/Score and Win \(A\):\s*(\d+)%/);
+            if (hm) homePct = parseInt(hm[1]);
+            if (am) awayPct = parseInt(am[1]);
+          }
         }
 
         // Non-directional: single coloured % top right
