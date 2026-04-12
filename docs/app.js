@@ -560,14 +560,18 @@ function renderFixturesView() {
                 <div class="fixture-teams">
                   <div class="fixture-team-col">
                     ${homeProb}
-                    ${f.home_logo ? `<img class="team-logo" src="${esc(f.home_logo)}" alt="" onerror="this.style.display='none'">` : ''}
-                    <span class="team-name home">${esc(f.home_team)}</span>
+                    <div class="team-name-row">
+                      ${f.home_logo ? `<img class="team-logo" src="${esc(f.home_logo)}" alt="" onerror="this.style.display='none'">` : ''}
+                      <span class="team-name home">${esc(f.home_team)}</span>
+                    </div>
                   </div>
                   ${middle}
                   <div class="fixture-team-col away">
                     ${awayProb}
-                    <span class="team-name away">${esc(f.away_team)}</span>
-                    ${f.away_logo ? `<img class="team-logo" src="${esc(f.away_logo)}" alt="" onerror="this.style.display='none'">` : ''}
+                    <div class="team-name-row away">
+                      <span class="team-name away">${esc(f.away_team)}</span>
+                      ${f.away_logo ? `<img class="team-logo" src="${esc(f.away_logo)}" alt="" onerror="this.style.display='none'">` : ''}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -635,7 +639,7 @@ function renderPicksView() {
           <div class="pick-header-row" onclick="openDetailFromPick(${i})" style="cursor:pointer">
             <div class="pick-teams">
             ${pick.home_logo ? `<img class="team-logo" src="${esc(pick.home_logo)}" alt="" onerror="this.style.display='none'">` : ''}
-            ${esc(pick.home_team)} <span class="vs-sep">vs</span> ${esc(pick.away_team)}
+            <span>${esc(pick.home_team)}</span> <span class="vs-sep">vs</span> <span>${esc(pick.away_team)}</span>
             ${pick.away_logo ? `<img class="team-logo" src="${esc(pick.away_logo)}" alt="" onerror="this.style.display='none'">` : ''}
           </div>
             <span class="fixture-score-pct" style="color:${sc}">${pick.score}%</span>
