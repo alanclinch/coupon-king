@@ -260,9 +260,15 @@ main {
 }
 
 .fixture-team-pct {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
+  margin-top: 3px;
+}
+
+.fixture-team-pct.away {
+  text-align: right;
+  display: block;
 }
 
 .fixture-team-pct.muted {

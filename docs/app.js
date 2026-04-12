@@ -529,21 +529,28 @@ function renderFixturesView() {
         const isDirectional = scoreInfo && (scoreInfo.bet_type === 'WIN' || scoreInfo.bet_type === 'BTTS_WIN');
         const sColor = scoreInfo ? scoreColor(scoreInfo.bet_type, scoreInfo.score) : null;
 
-        // Non-directional: colored percentage
+        // Parse both team probabilities from reasoning for directional bets
+        let homePct = null, awayPct = null;
+        if (scoreInfo && isDirectional && scoreInfo.reasoning && scoreInfo.reasoning.length) {
+          const line = scoreInfo.reasoning[0];
+          const hm = line.match(/(?:Home win|Score and Win \(H\)):\s*(\d+)%/);
+          const am = line.match(/(?:Away win|Score and Win \(A\)):\s*(\d+)%/);
+          if (hm) homePct = parseInt(hm[1]);
+          if (am) awayPct = parseInt(am[1]);
+        }
+
+        // Non-directional: single coloured % top right
         const scoreDot = (scoreInfo && !isDirectional)
           ? `<span class="fixture-score-pct" style="color:${sColor}">${scoreInfo.score}%</span>`
           : '';
 
-        // Directional: percentage under each team name
-        let homeProb = '', awayProb = '';
-        if (scoreInfo && isDirectional && scoreInfo.pick) {
-          const pct = scoreInfo.score;
-          if (scoreInfo.pick === 'home') {
-            homeProb = `<span class="fixture-team-pct" style="color:${sColor}">${pct}%</span>`;
-          } else {
-            awayProb = `<span class="fixture-team-pct" style="color:${sColor}">${pct}%</span>`;
-          }
-        }
+        // Directional: % below each team name, each coloured independently
+        const homeProbEl = (isDirectional && homePct !== null)
+          ? `<span class="fixture-team-pct" style="color:${scoreColor(scoreInfo.bet_type, homePct)}">${homePct}%</span>`
+          : '';
+        const awayProbEl = (isDirectional && awayPct !== null)
+          ? `<span class="fixture-team-pct away" style="color:${scoreColor(scoreInfo.bet_type, awayPct)}">${awayPct}%</span>`
+          : '';
 
         html += `
           <div class="${classes}">
@@ -559,19 +566,19 @@ function renderFixturesView() {
                 </div>
                 <div class="fixture-teams">
                   <div class="fixture-team-col">
-                    ${homeProb}
                     <div class="team-name-row">
                       ${f.home_logo ? `<img class="team-logo" src="${esc(f.home_logo)}" alt="" onerror="this.style.display='none'">` : ''}
                       <span class="team-name home">${esc(f.home_team)}</span>
                     </div>
+                    ${homeProbEl}
                   </div>
                   ${middle}
                   <div class="fixture-team-col away">
-                    ${awayProb}
                     <div class="team-name-row away">
                       <span class="team-name away">${esc(f.away_team)}</span>
                       ${f.away_logo ? `<img class="team-logo" src="${esc(f.away_logo)}" alt="" onerror="this.style.display='none'">` : ''}
                     </div>
+                    ${awayProbEl}
                   </div>
                 </div>
               </div>
