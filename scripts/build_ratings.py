@@ -179,6 +179,10 @@ def main():
     print(f"  Home advantage γ = {gamma:.3f}")
     print(f"  Low-score correction ρ = {rho:.4f}")
 
+    # Reconnect — Neon may have dropped the idle connection during optimisation
+    conn.close()
+    conn = get_conn()
+
     # Save ratings
     with conn.cursor() as cur:
         for tid, idx in team_index.items():
