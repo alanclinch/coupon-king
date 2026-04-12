@@ -278,7 +278,7 @@ main {
 }
 
 .team-name-row.away {
-  flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 
 .team-logo {
