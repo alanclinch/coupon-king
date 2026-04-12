@@ -39,8 +39,10 @@ _FIXTURE_COLS = """
     l.name  AS league_name,
     f.home_team_id,
     ht.name AS home_team,
+    ht.logo_url AS home_logo,
     f.away_team_id,
     at.name AS away_team,
+    at.logo_url AS away_logo,
     r.home_goals,
     r.away_goals
 """

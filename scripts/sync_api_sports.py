@@ -37,19 +37,24 @@ def get_local_league_id(conn, name):
         return row[0] if row else None
 
 def upsert_team(cur, api_team_id, name, local_league_id):
+    logo_url = f"https://media.api-sports.io/football/teams/{api_team_id}.png"
+
     cur.execute("""
         SELECT local_id FROM api_id_map
         WHERE table_name = 'teams' AND api_source = 'api-sports' AND api_id = %s
     """, (str(api_team_id),))
     row = cur.fetchone()
     if row:
-        return row[0]
+        local_id = row[0]
+        cur.execute("UPDATE teams SET logo_url = %s WHERE id = %s AND logo_url IS NULL",
+                    (logo_url, local_id))
+        return local_id
 
     cur.execute("""
-        INSERT INTO teams (name, league_id, active)
-        VALUES (%s, %s, TRUE)
+        INSERT INTO teams (name, league_id, active, logo_url)
+        VALUES (%s, %s, TRUE, %s)
         RETURNING id
-    """, (name, local_league_id))
+    """, (name, local_league_id, logo_url))
     local_id = cur.fetchone()[0]
 
     cur.execute("""

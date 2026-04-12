@@ -558,9 +558,17 @@ function renderFixturesView() {
                   </div>
                 </div>
                 <div class="fixture-teams">
-                  <div class="fixture-team-col">${homeProb}<span class="team-name home">${esc(f.home_team)}</span></div>
+                  <div class="fixture-team-col">
+                    ${homeProb}
+                    ${f.home_logo ? `<img class="team-logo" src="${esc(f.home_logo)}" alt="" onerror="this.style.display='none'">` : ''}
+                    <span class="team-name home">${esc(f.home_team)}</span>
+                  </div>
                   ${middle}
-                  <div class="fixture-team-col away">${awayProb}<span class="team-name away">${esc(f.away_team)}</span></div>
+                  <div class="fixture-team-col away">
+                    ${awayProb}
+                    <span class="team-name away">${esc(f.away_team)}</span>
+                    ${f.away_logo ? `<img class="team-logo" src="${esc(f.away_logo)}" alt="" onerror="this.style.display='none'">` : ''}
+                  </div>
                 </div>
               </div>
               ${!completed ? `<button class="add-btn${sel ? ' added' : ''}" onclick="handleAddBtn(${f.id})" aria-label="${sel ? 'Remove from coupon' : 'Add to coupon'}">${sel ? '&#10003;' : '+'}</button>` : ''}
@@ -625,7 +633,11 @@ function renderPicksView() {
         </div>
         <div class="pick-body">
           <div class="pick-header-row" onclick="openDetailFromPick(${i})" style="cursor:pointer">
-            <div class="pick-teams">${esc(pick.home_team)} <span class="vs-sep">vs</span> ${esc(pick.away_team)}</div>
+            <div class="pick-teams">
+            ${pick.home_logo ? `<img class="team-logo" src="${esc(pick.home_logo)}" alt="" onerror="this.style.display='none'">` : ''}
+            ${esc(pick.home_team)} <span class="vs-sep">vs</span> ${esc(pick.away_team)}
+            ${pick.away_logo ? `<img class="team-logo" src="${esc(pick.away_logo)}" alt="" onerror="this.style.display='none'">` : ''}
+          </div>
             <span class="fixture-score-pct" style="color:${sc}">${pick.score}%</span>
           </div>
           <div class="pick-sub">${esc(pick.league_name)} &middot; ${esc(fmtDate(pick.kickoff_time))} ${esc(fmtTime(pick.kickoff_time))} &middot; ${esc(betLabel)}</div>

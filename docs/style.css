@@ -270,6 +270,13 @@ main {
   font-weight: 400;
 }
 
+.team-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .team-name {
   flex: 1;
   font-size: 15px;
